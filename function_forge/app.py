@@ -93,6 +93,8 @@ class FunctionApp:
         self._line_width: float  = AppConstants.DEFAULT_LINE_WIDTH * 2  # thicker default for print
         self._show_grid: bool    = True
         self._dot_style: str     = "closed"   # "closed" | "open"
+        self._mapping_shape: str = "oval"     # "oval" | "rectangle"
+        self._came_from_random: bool = False
         self._show_vlt: bool     = False
         self._grid_style: str    = "print"    # "print" | "color"
         self._show_xy_labels: bool = True
@@ -117,12 +119,14 @@ class FunctionApp:
             "Graphs": [
                 "Linear",
                 "Smooth Curve",
+                "Reciprocal",
                 "Piecewise",
                 "Step Function",
                 "Parametric",
                 "Scatter Plot",
             ],
             "Mappings": ["Mapping"],
+            "Random": ["Random Graph"],
         }
 
     # ── Layout ────────────────────────────────────────────────────────────────
@@ -176,28 +180,19 @@ class FunctionApp:
         self.model_combo.grid(row=0, column=1, padx=(8, 5), pady=5)
         self.model_combo.bind("<<ComboboxSelected>>", self._on_model_change)
 
-        # Random button
-        self.random_btn = _StyledButton(self.center_container, text="⟳ Random",
-                                         font=AppConstants.scaled_btn_font(),
-                                         width=72, height=BTN_H,
-                                         command=self._generate_random)
-        self.random_btn.grid(row=0, column=2, padx=(8, 2), pady=5)
-        self.random_btn.grid_remove()
-        _Tooltip(self.random_btn, "Generate a random graph (any type)")
-
         # Save / Copy
         self.save_btn = _StyledButton(self.center_container, text="Save",
                                        font=AppConstants.scaled_btn_font(),
                                        width=52, height=BTN_H,
                                        command=self.save_image)
-        self.save_btn.grid(row=0, column=3, padx=(12, 1), pady=5)
+        self.save_btn.grid(row=0, column=2, padx=(12, 1), pady=5)
         self.save_btn.grid_remove()
 
         self.copy_btn = _StyledButton(self.center_container, text="Copy",
                                        font=AppConstants.scaled_btn_font(),
                                        width=52, height=BTN_H,
                                        command=self.copy_to_clipboard)
-        self.copy_btn.grid(row=0, column=4, padx=1, pady=5)
+        self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
         self.copy_btn.grid_remove()
 
     def _create_controls_row(self) -> None:
@@ -228,6 +223,32 @@ class FunctionApp:
         self._build_input_panel()
         self._build_options_panel()
         self._build_style_panel()
+
+        # Random-mode controls: three buttons, replaces all other controls
+        self.random_controls = tk.Frame(self.controls_center, bg=AppConstants.BG_COLOR)
+        self.random_controls.grid(row=0, column=0, columnspan=3, sticky="n", pady=8)
+        self.random_controls.grid_remove()
+
+        self.random_fire_btn = _StyledButton(
+            self.random_controls, text="⟳ Random",
+            font=AppConstants.scaled_btn_font(),
+            width=120,
+            command=self._fire_random)
+        self.random_fire_btn.grid(row=0, column=0, padx=6)
+
+        self.random_graph_btn = _StyledButton(
+            self.random_controls, text="⟳ Graph",
+            font=AppConstants.scaled_btn_font(),
+            width=100,
+            command=lambda: self._fire_random(category="Graphs"))
+        self.random_graph_btn.grid(row=0, column=1, padx=6)
+
+        self.random_mapping_btn = _StyledButton(
+            self.random_controls, text="⟳ Mapping",
+            font=AppConstants.scaled_btn_font(),
+            width=100,
+            command=lambda: self._fire_random(category="Mappings"))
+        self.random_mapping_btn.grid(row=0, column=2, padx=6)
 
     def _build_input_panel(self) -> None:
         """Coordinate entry for scatter/discrete; param display for line graphs."""
@@ -321,13 +342,31 @@ class FunctionApp:
         self._xy_label_chk.grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
         self._xy_label_chk.grid_remove()  # hidden until Mapping selected
 
+        # Shape toggle (Oval / Rectangle) — only shown for Mapping
+        shape_row = tk.Frame(frame, bg=bg)
+        shape_row.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+        self._shape_oval_btn = _StyledButton(
+            shape_row, text="Oval",
+            font=AppConstants.scaled_btn_font(),
+            width=60, active=True,
+            command=lambda: self._set_mapping_shape("oval"))
+        self._shape_oval_btn.pack(side=tk.LEFT, padx=(0, 2))
+        self._shape_rect_btn = _StyledButton(
+            shape_row, text="Rect",
+            font=AppConstants.scaled_btn_font(),
+            width=60, active=False,
+            command=lambda: self._set_mapping_shape("rectangle"))
+        self._shape_rect_btn.pack(side=tk.LEFT)
+        self._shape_row = shape_row
+        self._shape_row.grid_remove()  # hidden until Mapping selected
+
         # Dot style (open / closed)
         tk.Label(frame, text="Endpoints:", bg=bg,
                  font=AppConstants.scaled_btn_font()).grid(
-                     row=4, column=0, sticky="w", pady=(6, 0))
+                     row=5, column=0, sticky="w", pady=(6, 0))
 
         dot_row = tk.Frame(frame, bg=bg)
-        dot_row.grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
+        dot_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
 
         self._dot_closed_btn = _StyledButton(
             dot_row, text="●  Closed",
@@ -570,23 +609,27 @@ class FunctionApp:
     def _show_topbar_category_only(self) -> None:
         self.cat_combo.grid()
         self.model_combo.grid_remove()
-        self.random_btn.grid_remove()
         if self.save_btn: self.save_btn.grid_remove()
         if self.copy_btn: self.copy_btn.grid_remove()
 
     def _show_topbar_category_and_model(self) -> None:
         self.cat_combo.grid()
         self.model_combo.grid(row=0, column=1, padx=(8, 5), pady=5)
-        self.random_btn.grid_remove()
         if self.save_btn: self.save_btn.grid_remove()
         if self.copy_btn: self.copy_btn.grid_remove()
 
     def _show_topbar_all(self) -> None:
         self.cat_combo.grid()
         self.model_combo.grid(row=0, column=1, padx=(8, 5), pady=5)
-        self.random_btn.grid(row=0, column=2, padx=(8, 2), pady=5)
-        self.save_btn.grid(row=0, column=3, padx=(12, 1), pady=5)
-        self.copy_btn.grid(row=0, column=4, padx=1, pady=5)
+        self.save_btn.grid(row=0, column=2, padx=(12, 1), pady=5)
+        self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
+
+    def _show_topbar_random(self) -> None:
+        """Random category: show category + save/copy, hide model picker."""
+        self.cat_combo.grid()
+        self.model_combo.grid_remove()
+        self.save_btn.grid(row=0, column=2, padx=(12, 1), pady=5)
+        self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
 
     # ── Welcome screen ────────────────────────────────────────────────────────
 
@@ -693,8 +736,60 @@ class FunctionApp:
 
     # ── Category / Model selection ────────────────────────────────────────────
 
+    def _fire_random(self, category: str | None = None) -> None:
+        """Pick and draw a completely random type, optionally filtered by category."""
+        import random as _rand
+        all_types = [
+            (c, m)
+            for c, models in self.model_data.items()
+            if c != "Random" and (category is None or c == category)
+            for m in models
+        ]
+        chosen_cat, chosen_model = _rand.choice(all_types)
+        self._came_from_random = True
+
+        # Update model combo silently (keep cat combo showing "Random")
+        self.model_combo["values"] = self.model_data.get(chosen_cat, [])
+        self.model_combo.set(chosen_model)
+
+        # Generate params just like _on_model_change does
+        self._current_params = get_random_params(chosen_model)
+        if chosen_model == "Mapping":
+            self._current_params["show_labels"] = self._show_xy_labels
+            self._mapping_shape = self._current_params.get("shape", "oval")
+
+        # Layout: controls row with only the Random button
+        self._show_topbar_random()
+        self.root.rowconfigure(2, weight=0)
+        self.controls_row.grid(row=1, column=0, sticky="ew")
+        self.col_canvas.grid(row=2, column=0)
+        self.root.rowconfigure(1, weight=0,
+                                minsize=AppConstants.scaled_controls_height())
+        self._apply_ui_scale(self.root.winfo_width())
+        self.shortcut_bar.grid(row=3, column=0, sticky="ew")
+        self.shortcut_label.config(text="Save [Ctrl+S]     •     Copy [Ctrl+C]")
+        self.col_inputs.grid_remove()
+        self.col_options.grid_remove()
+        self.col_style.grid_remove()
+        self.random_controls.grid()
+
+        self._schedule_redraw()
+
     def _on_category_change(self, event=None) -> None:
+        if getattr(self, '_category_changing', False):
+            return
         cat = self.cat_combo.get()
+
+        # ── Random category: delegate entirely to _fire_random ────────────────
+        if cat == "Random":
+            self._category_changing = True
+            self._fire_random()
+            self.root.after(50, lambda: setattr(self, '_category_changing', False))
+            return
+
+        # Normal category — clear random mode
+        self._came_from_random = False
+
         models = self.model_data.get(cat, [])
         self.model_combo["values"] = models
         self.model_combo.set("")
@@ -737,7 +832,18 @@ class FunctionApp:
         if not model:
             return
 
-        self._show_topbar_all()
+        # ── "Random" entry in Graphs list: no longer in Graphs, kept for safety
+        if model in ("Random", "Random Graph"):
+            import random as _rand
+            graphs = list(self.model_data.get("Graphs", []))
+            model = _rand.choice(graphs)
+            self.model_combo.set(model)
+            self._came_from_random = True
+        # Note: _came_from_random is only cleared by _on_category_change
+        # when the user explicitly picks a non-Random category.
+
+        # ── Layout: controls row always visible; swap random vs normal panels ──
+        self._show_topbar_all() if not self._came_from_random else self._show_topbar_random()
         self.root.rowconfigure(2, weight=0)
         self.controls_row.grid(row=1, column=0, sticky="ew")
         self.col_canvas.grid(row=2, column=0)
@@ -745,8 +851,18 @@ class FunctionApp:
                                 minsize=AppConstants.scaled_controls_height())
         self._apply_ui_scale(self.root.winfo_width())
         self.shortcut_bar.grid(row=3, column=0, sticky="ew")
-        self.shortcut_label.config(
-            text="Save [Ctrl+S]     •     Copy [Ctrl+C]")
+        self.shortcut_label.config(text="Save [Ctrl+S]     •     Copy [Ctrl+C]")
+
+        if self._came_from_random:
+            # Random mode: hide all normal panels, show just the Random button
+            self.col_inputs.grid_remove()
+            self.col_options.grid_remove()
+            self.col_style.grid_remove()
+            self.random_controls.grid()
+            return
+
+        # Normal mode: hide random controls, show normal panels
+        self.random_controls.grid_remove()
 
         # Show/hide input panel based on graph type
         is_set_model  = model in ("Scatter Plot",)
@@ -765,18 +881,25 @@ class FunctionApp:
             self._vlt_chk.grid_remove()
             self._dot_closed_btn.master.grid_remove()
             self._xy_label_chk.grid()
+            self._shape_row.grid()
             self.col_style.grid_remove()   # no color/weight for mappings
+            self.rerandom_btn.configure(text="⟳ New Mapping")
         else:
             self._grid_chk.grid()
             self._vlt_chk.grid()
             self._dot_closed_btn.master.grid()
             self._xy_label_chk.grid_remove()
+            self._shape_row.grid_remove()
             self.col_style.grid()
+            self.rerandom_btn.configure(text="⟳ New Graph")
 
         # Generate initial random params
         self._current_params = get_random_params(model)
         if is_mapping:
             self._current_params["show_labels"] = self._show_xy_labels
+            self._mapping_shape = self._current_params.get("shape", "oval")
+            self._shape_oval_btn.set_active(self._mapping_shape == "oval")
+            self._shape_rect_btn.set_active(self._mapping_shape == "rectangle")
         if is_set_model:
             # Populate entry with the random points
             pts = self._current_params.get("points", [])
@@ -825,6 +948,11 @@ class FunctionApp:
             lines.append(f"{len(steps)} steps")
         elif model == "Parametric":
             lines.append(f"Curve: {p.get('curve', '').title()}")
+        elif model == "Reciprocal":
+            k, h, v = p.get('k', 1), p.get('h', 0), p.get('v', 0)
+            h_str = f"(x{'-' if h >= 0 else '+'}{abs(h)})" if h != 0 else "x"
+            v_str = f" + {v}" if v > 0 else (f" - {abs(v)}" if v < 0 else "")
+            lines.append(f"y = {k}/{h_str}{v_str}")
         self.param_lbl.config(text="\n".join(lines))
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
@@ -843,6 +971,14 @@ class FunctionApp:
         self._show_xy_labels = self.xy_label_var.get()
         if "show_labels" in self._current_params:
             self._current_params["show_labels"] = self._show_xy_labels
+        self._schedule_redraw()
+
+    def _set_mapping_shape(self, shape: str) -> None:
+        self._mapping_shape = shape
+        self._shape_oval_btn.set_active(shape == "oval")
+        self._shape_rect_btn.set_active(shape == "rectangle")
+        if "shape" in self._current_params:
+            self._current_params["shape"] = shape
         self._schedule_redraw()
 
     def _on_grid_toggle(self) -> None:
@@ -917,23 +1053,32 @@ class FunctionApp:
         self._current_params = get_random_params(model)
         if model == "Mapping":
             self._current_params["show_labels"] = self._show_xy_labels
+            # Sync shape: use whatever random_params picked, update buttons
+            self._mapping_shape = self._current_params.get("shape", "oval")
+            self._shape_oval_btn.set_active(self._mapping_shape == "oval")
+            self._shape_rect_btn.set_active(self._mapping_shape == "rectangle")
         self._update_param_label()
         self._schedule_redraw()
 
+    def _pick_new_random_graph(self) -> None:
+        """Pick a completely new random type from everything in the app."""
+        self._fire_random()
+
     def _generate_random(self) -> None:
-        """Pick a completely random graph type and generate it."""
-        import random
-        cat = self.cat_combo.get()
-        # Pick random category if none selected
-        if cat not in self.model_data:
-            cat = random.choice(list(self.model_data.keys()))
-        # Pick random model within that category
-        models = self.model_data.get(cat, [])
-        if not models:
-            return
-        model = random.choice(models)
-        self.model_combo.set(model)
-        self._on_model_change()
+        """Re-roll in Random mode, or randomize within category otherwise."""
+        if self._came_from_random:
+            self._fire_random()
+        else:
+            import random
+            cat = self.cat_combo.get()
+            if cat not in self.model_data:
+                cat = random.choice(list(self.model_data.keys()))
+            models = [m for m in self.model_data.get(cat, []) if m != "Random"]
+            if not models:
+                return
+            model = random.choice(models)
+            self.model_combo.set(model)
+            self._on_model_change()
 
     # ── Drawing ───────────────────────────────────────────────────────────────
 

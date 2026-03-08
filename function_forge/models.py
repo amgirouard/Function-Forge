@@ -128,6 +128,8 @@ def _build_graph_configs() -> None:
         GraphConfig("Parametric",    "Graphs",   is_function=False,
                     description="Closed curve — relation, not a function"),
         GraphConfig("Scatter Plot",  "Graphs",   is_function=None),
+        GraphConfig("Reciprocal",    "Graphs",   is_function=False,
+                    description="y = k/(x-h)+v — hyperbola with asymptotes"),
         # Mappings
         GraphConfig("Mapping",       "Mappings", is_function=None),
     ]

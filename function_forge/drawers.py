@@ -668,33 +668,62 @@ class MappingDrawer(GraphDrawer):
         ax.set_yticks([])
 
         p           = ctx.params
-        domain      = p.get("domain", [1, 2, 3])
-        range_vals  = p.get("range_vals", [4, 5, 6])
-        arrows      = p.get("arrows", [(0, 0), (1, 1), (2, 2)])
-        show_labels = p.get("show_labels", True)
-        lw          = max(1.2, ctx.line_width * 0.55)
+        domain_raw     = p.get("domain", [1, 2, 3])
+        range_vals_raw = p.get("range_vals", [4, 5, 6])
+        arrows_raw     = p.get("arrows", [(0, 0), (1, 1), (2, 2)])
+        show_labels    = p.get("show_labels", True)
+        lw             = max(1.2, ctx.line_width * 0.55)
 
-        # ── Oval geometry — narrower, further apart ───────────────────────────
-        lx, rx = 2.5, 7.5      # centres further apart
+        # ── Filter: only show values that participate in at least one arrow ──────
+        used_d = {di for di, ri in arrows_raw}
+        used_r = {ri for di, ri in arrows_raw}
+        # Build index remapping: old index → new index (or None if filtered out)
+        d_keep   = [i for i in range(len(domain_raw))     if i in used_d]
+        r_keep   = [i for i in range(len(range_vals_raw)) if i in used_r]
+        d_remap  = {old: new for new, old in enumerate(d_keep)}
+        r_remap  = {old: new for new, old in enumerate(r_keep)}
+        domain     = [domain_raw[i]     for i in d_keep]
+        range_vals = [range_vals_raw[i] for i in r_keep]
+        arrows     = [
+            (d_remap[di], r_remap[ri])
+            for di, ri in arrows_raw
+            if di in d_remap and ri in r_remap
+        ]
+
+        # ── Shape & geometry ─────────────────────────────────────────────────
+        shape  = p.get("shape", "oval")   # "oval" | "rectangle"
+        lx, rx = 2.5, 7.5
         cy     = 5.0
-        ow     = 1.4            # narrower half-width
-        oh     = 3.6            # same height
+        ow     = 1.55   # half-width  (wider -> rounder feel)
+        oh     = 2.8    # half-height (shorter than before)
 
-        from matplotlib.patches import Ellipse
-        oval_lw = max(1.8, lw * 1.2)
+        container_lw = max(1.8, lw * 1.2)
+
+        from matplotlib.patches import Ellipse, FancyBboxPatch
         for cx in (lx, rx):
-            ax.add_patch(Ellipse((cx, cy), width=ow * 2, height=oh * 2,
-                                  fill=False, edgecolor="#000000",
-                                  linewidth=oval_lw, zorder=2))
+            if shape == "rectangle":
+                radius = 0.45
+                ax.add_patch(FancyBboxPatch(
+                    (cx - ow, cy - oh), ow * 2, oh * 2,
+                    boxstyle=f"round,pad=0,rounding_size={radius}",
+                    fill=False, edgecolor="#000000",
+                    linewidth=container_lw, zorder=2
+                ))
+            else:
+                ax.add_patch(Ellipse(
+                    (cx, cy), width=ow * 2, height=oh * 2,
+                    fill=False, edgecolor="#000000",
+                    linewidth=container_lw, zorder=2
+                ))
 
-        # ── X / Y labels above ovals ──────────────────────────────────────────
+        # ── X / Y labels above shapes ─────────────────────────────────────────
         if show_labels:
             ax.text(lx, cy + oh + 0.45, "X", ha="center", va="bottom",
                     fontsize=15, fontweight="bold", color="#000000", zorder=3)
             ax.text(rx, cy + oh + 0.45, "Y", ha="center", va="bottom",
                     fontsize=15, fontweight="bold", color="#000000", zorder=3)
 
-        # ── Value positions — centred horizontally inside each oval ───────────
+        # ── Value positions — centred horizontally inside each shape ──────────
         def value_positions(values, cx):
             n = len(values)
             if n == 0:
@@ -717,18 +746,15 @@ class MappingDrawer(GraphDrawer):
                     fontsize=fs_val, fontweight="bold", color="#000000", zorder=3)
 
         # ── Arrows — from just right of each domain number to just left of range number
-        arrow_lw = max(1.6, ctx.line_width * 0.7)
+        arrow_lw = max(1.0, ctx.line_width * 0.45)
         # Estimate text half-width based on font size in data units
         # At fontsize 16 in a 0-10 axis space, ~0.35 units per character
         char_w = 0.38
 
-        # Fan-out: arrows leave from a single point but spread at the tip
-        # so chevron arms just touch without overlapping.
-        # arm=0.28 at angle_deg=30 → tip separation ≈ 2*0.28*sin(30°) = 0.28
-        arm        = 0.28
+        # Base chevron geometry
+        BASE_ARM   = 0.28
         angle_deg  = 30
-        # Space tips so adjacent arms just touch: separation = 2*arm*sin(angle)
-        tip_sep = 2 * arm * _m.sin(_m.radians(angle_deg))  # ≈ 0.28
+        tip_sep    = 2 * BASE_ARM * _m.sin(_m.radians(angle_deg)) * 0.55  # tightened
 
         from collections import Counter
         in_visits = Counter(ri for di, ri in arrows)
@@ -743,22 +769,16 @@ class MappingDrawer(GraphDrawer):
             d_half = len(d_text) * char_w / 2 + 0.12
             r_half = len(r_text) * char_w / 2 + 0.12
 
-            # Source: single fixed point per domain number (no fan at origin)
             sx = d_pos[di][0] + d_half
             sy = d_pos[di][1]
 
-            # Target base: centred on range number
             base_ex = r_pos[ri][0] - r_half
             base_ey = r_pos[ri][1]
 
-            # Fan at the tip: offset tip vertically so arms just touch
             n_in  = in_visits[ri]
             i_in  = in_index.get(ri, 0)
             in_index[ri] = i_in + 1
-            if n_in > 1:
-                tip_offset = (i_in - (n_in - 1) / 2) * tip_sep
-            else:
-                tip_offset = 0.0
+            tip_offset = (i_in - (n_in - 1) / 2) * tip_sep if n_in > 1 else 0.0
 
             ex = base_ex
             ey = base_ey + tip_offset
@@ -769,6 +789,10 @@ class MappingDrawer(GraphDrawer):
 
             ax.plot([sx, ex], [sy, ey], color="#000000",
                     linewidth=arrow_lw, zorder=4, solid_capstyle="round")
+
+            # Scale chevron arm down for crowded targets: each extra arrow
+            # shrinks the arm so heads stay tight rather than overlapping.
+            arm = BASE_ARM / max(1, n_in ** 0.6)
 
             length = _m.hypot(dx, dy)
             ux, uy = dx / length, dy / length
@@ -795,30 +819,111 @@ class MappingDrawer(GraphDrawer):
         domain     = sorted(random.sample(pool, min(nd, len(pool))))
         range_vals = sorted(random.sample(pool, min(nr, len(pool))))
 
-        # Max arrows = largest side + 1
-        max_arrows = max(nd, nr) + 1
-        target     = random.randint(max(nd, nr), max_arrows)
+        is_function = random.random() < 0.5
 
         out_count = [0] * nd
         in_count  = [0] * nr
         arrows    = []
         pairs = [(di, ri) for di in range(nd) for ri in range(nr)]
         random.shuffle(pairs)
-        for di, ri in pairs:
-            if len(arrows) >= target:
-                break
-            if out_count[di] >= 3 or in_count[ri] >= 3:
-                continue
-            arrows.append((di, ri))
-            out_count[di] += 1
-            in_count[ri]  += 1
+
+        if is_function:
+            # Every domain value gets exactly one arrow → strict function
+            # Shuffle domain indices and assign each one a range target
+            domain_order = list(range(nd))
+            random.shuffle(domain_order)
+            for di in domain_order:
+                candidates = [ri for ri in range(nr) if in_count[ri] < 3]
+                if not candidates:
+                    break
+                ri = random.choice(candidates)
+                arrows.append((di, ri))
+                out_count[di] += 1
+                in_count[ri]  += 1
+        else:
+            # Non-function: at least one domain value maps to 2+ range values
+            target = random.randint(nd + 1, min(nd * 2, nd * nr))
+            for di, ri in pairs:
+                if len(arrows) >= target:
+                    break
+                if out_count[di] >= 3 or in_count[ri] >= 3:
+                    continue
+                arrows.append((di, ri))
+                out_count[di] += 1
+                in_count[ri]  += 1
+            # Ensure at least one domain value has 2 outgoing arrows
+            multi_out = [di for di in range(nd) if out_count[di] >= 2]
+            if not multi_out:
+                # Force one domain value to get a second arrow
+                for di in range(nd):
+                    extras = [(di, ri) for ri in range(nr)
+                              if (di, ri) not in arrows and in_count[ri] < 3]
+                    if extras:
+                        di2, ri2 = random.choice(extras)
+                        arrows.append((di2, ri2))
+                        break
 
         return {
             "domain":      domain,
             "range_vals":  range_vals,
             "arrows":      arrows,
             "show_labels": True,
+            "shape":       random.choice(["oval", "rectangle"]),
         }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECIPROCAL DRAWER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@GraphRegistry.register("Reciprocal")
+class ReciprocalDrawer(GraphDrawer):
+    """y = k / (x - h) + v  — hyperbola with vertical and horizontal asymptotes."""
+
+    def draw(self, ctx: DrawingContext) -> None:
+        self._setup_axes(ctx)
+        ax  = ctx.ax
+        p   = ctx.params
+
+        k = p.get("k",  1.0)   # stretch / flip
+        h = p.get("h",  0.0)   # horizontal shift (vertical asymptote at x=h)
+        v = p.get("v",  0.0)   # vertical shift   (horizontal asymptote at y=v)
+
+        # Draw asymptotes as light dashed lines
+        asy_color = "#aaaaaa"
+        asy_lw    = 1.0
+        ax.plot([h, h], [LO, HI], color=asy_color, linewidth=asy_lw,
+                linestyle="--", zorder=2, solid_capstyle="butt")
+        ax.plot([LO, HI], [v, v], color=asy_color, linewidth=asy_lw,
+                linestyle="--", zorder=2, solid_capstyle="butt")
+
+        # Plot each branch separately, skipping the singularity at x == h
+        eps   = 1e-6
+        x_all = np.linspace(LO, HI, 1200)
+
+        for branch_mask in [x_all < h - eps, x_all > h + eps]:
+            xb = x_all[branch_mask]
+            if len(xb) < 2:
+                continue
+            yb = k / (xb - h) + v
+            in_range = (yb >= LO) & (yb <= HI)
+            SmoothCurveDrawer._plot_segments(
+                ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
+            )
+            # Arrowhead at the far end of each branch
+            LinearDrawer._add_line_arrows(
+                ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
+            )
+
+        if ctx.show_vlt:
+            self._draw_vlt(ctx, list(x_all))
+
+    @classmethod
+    def random_params(cls) -> dict:
+        k = random.choice([-3, -2, -1, 1, 2, 3])
+        h = random.choice([-2, -1, 0, 1, 2])
+        v = random.choice([-2, -1, 0, 1, 2])
+        return {"k": k, "h": h, "v": v}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Random generation dispatcher
@@ -831,6 +936,7 @@ _RANDOM_DRAWERS: dict[str, type] = {
     "Step Function":   StepFunctionDrawer,
     "Parametric":      ParametricDrawer,
     "Scatter Plot":    ScatterPlotDrawer,
+    "Reciprocal":      ReciprocalDrawer,
     "Mapping":         MappingDrawer,
 }
 
