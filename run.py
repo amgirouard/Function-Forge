@@ -1,10 +1,9 @@
-"""Launch Function Forge."""
+"""Launch Function Forge (Streamlit web app)."""
+import subprocess
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(__file__))
-
-from function_forge.app import main
-
 if __name__ == "__main__":
-    main()
+    here = os.path.dirname(os.path.abspath(__file__))
+    app  = os.path.join(here, "streamlit_app.py")
+    subprocess.run(["streamlit", "run", app], check=True)
