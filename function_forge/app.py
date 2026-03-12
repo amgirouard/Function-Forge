@@ -67,6 +67,108 @@ class _Tooltip:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Batch Export helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _show_batch_count_dialog(parent: tk.Widget) -> "int | None":
+    """Modal dialog asking how many images to export. Returns count or None."""
+    result: list = [None]
+    dlg = tk.Toplevel(parent)
+    dlg.title("Batch Export")
+    dlg.resizable(False, False)
+    dlg.grab_set()
+    dlg.configure(bg=AppConstants.BG_COLOR)
+
+    bg = AppConstants.BG_COLOR
+    tk.Label(dlg, text="How many images to export?",
+             bg=bg, font=("Arial", 11, "bold")).pack(pady=(16, 8), padx=20)
+
+    count_var = tk.IntVar(value=10)
+
+    preset_frame = tk.Frame(dlg, bg=bg)
+    preset_frame.pack(pady=4, padx=20)
+    for val in (5, 10, 25):
+        _StyledButton(
+            preset_frame, text=str(val),
+            font=AppConstants.scaled_btn_font(),
+            width=52, height=BTN_H,
+            command=lambda v=val: count_var.set(v),
+        ).pack(side=tk.LEFT, padx=4)
+
+    custom_frame = tk.Frame(dlg, bg=bg)
+    custom_frame.pack(pady=(4, 12), padx=20)
+    tk.Label(custom_frame, text="Custom:", bg=bg,
+             font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT, padx=(0, 6))
+    tk.Spinbox(custom_frame, from_=1, to=500, textvariable=count_var,
+               width=6, font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT)
+
+    action_frame = tk.Frame(dlg, bg=bg)
+    action_frame.pack(pady=(0, 16), padx=20)
+
+    def _confirm() -> None:
+        try:
+            n = int(count_var.get())
+            if n >= 1:
+                result[0] = n
+        except (ValueError, tk.TclError):
+            pass
+        dlg.destroy()
+
+    _StyledButton(action_frame, text="Export",
+                  font=AppConstants.scaled_btn_font(),
+                  width=80, height=BTN_H,
+                  command=_confirm).pack(side=tk.LEFT, padx=(0, 8))
+    _StyledButton(action_frame, text="Cancel",
+                  font=AppConstants.scaled_btn_font(),
+                  width=70, height=BTN_H,
+                  command=dlg.destroy).pack(side=tk.LEFT)
+
+    dlg.update_idletasks()
+    px = parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_reqwidth()) // 2
+    py = parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_reqheight()) // 2
+    dlg.geometry(f"+{px}+{py}")
+    parent.wait_window(dlg)
+    return result[0]
+
+
+class _BatchProgressDialog:
+    """Simple progress display during batch export."""
+
+    def __init__(self, parent: tk.Widget, total: int) -> None:
+        self.cancelled = False
+        self._total = total
+        dlg = tk.Toplevel(parent)
+        dlg.title("Exporting\u2026")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.configure(bg=AppConstants.BG_COLOR)
+        self._dlg = dlg
+
+        bg = AppConstants.BG_COLOR
+        self._lbl = tk.Label(dlg, text=f"Preparing {total} image\u2026",
+                             bg=bg, font=("Arial", 11), pady=8, padx=20)
+        self._lbl.pack()
+        _StyledButton(dlg, text="Cancel",
+                      font=AppConstants.scaled_btn_font(),
+                      width=80, height=BTN_H,
+                      command=self._on_cancel).pack(pady=(0, 12))
+
+        dlg.update_idletasks()
+        px = parent.winfo_rootx() + (parent.winfo_width() - dlg.winfo_reqwidth()) // 2
+        py = parent.winfo_rooty() + (parent.winfo_height() - dlg.winfo_reqheight()) // 2
+        dlg.geometry(f"+{px}+{py}")
+
+    def update(self, current: int, model_name: str) -> None:
+        self._lbl.config(text=f"Exporting {current} of {self._total}  ({model_name})")
+
+    def _on_cancel(self) -> None:
+        self.cancelled = True
+
+    def destroy(self) -> None:
+        self._dlg.destroy()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main Application
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -107,6 +209,7 @@ class FunctionApp:
         self.controls_row = None
         self.save_btn = None
         self.copy_btn = None
+        self.batch_btn = None
 
         self._setup_data()
         self._setup_layout()
@@ -194,6 +297,13 @@ class FunctionApp:
                                        command=self.copy_to_clipboard)
         self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
         self.copy_btn.grid_remove()
+
+        self.batch_btn = _StyledButton(self.center_container, text="Batch Export",
+                                        font=AppConstants.scaled_btn_font(),
+                                        width=90, height=BTN_H,
+                                        command=self.batch_export)
+        self.batch_btn.grid(row=0, column=4, padx=(1, 5), pady=5)
+        self.batch_btn.grid_remove()
 
     def _create_controls_row(self) -> None:
         controls = tk.Frame(self.root, bg=AppConstants.BG_COLOR,
@@ -611,25 +721,29 @@ class FunctionApp:
         self.model_combo.grid_remove()
         if self.save_btn: self.save_btn.grid_remove()
         if self.copy_btn: self.copy_btn.grid_remove()
+        if self.batch_btn: self.batch_btn.grid_remove()
 
     def _show_topbar_category_and_model(self) -> None:
         self.cat_combo.grid()
         self.model_combo.grid(row=0, column=1, padx=(8, 5), pady=5)
         if self.save_btn: self.save_btn.grid_remove()
         if self.copy_btn: self.copy_btn.grid_remove()
+        if self.batch_btn: self.batch_btn.grid_remove()
 
     def _show_topbar_all(self) -> None:
         self.cat_combo.grid()
         self.model_combo.grid(row=0, column=1, padx=(8, 5), pady=5)
         self.save_btn.grid(row=0, column=2, padx=(12, 1), pady=5)
         self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
+        self.batch_btn.grid(row=0, column=4, padx=(1, 5), pady=5)
 
     def _show_topbar_random(self) -> None:
-        """Random category: show category + save/copy, hide model picker."""
+        """Random category: show category + save/copy/batch, hide model picker."""
         self.cat_combo.grid()
         self.model_combo.grid_remove()
         self.save_btn.grid(row=0, column=2, padx=(12, 1), pady=5)
         self.copy_btn.grid(row=0, column=3, padx=1, pady=5)
+        self.batch_btn.grid(row=0, column=4, padx=(1, 5), pady=5)
 
     # ── Welcome screen ────────────────────────────────────────────────────────
 
@@ -1133,7 +1247,7 @@ class FunctionApp:
 
     # ── Color swatch helpers ──────────────────────────────────────────────────
 
-    # ── Save / Copy ───────────────────────────────────────────────────────────
+    # ── Save / Copy / Batch Export ────────────────────────────────────────────
 
     def save_image(self) -> None:
         filepath = filedialog.asksaveasfilename(
@@ -1184,6 +1298,105 @@ class FunctionApp:
                 process.communicate(buf.read())
         except Exception as exc:
             messagebox.showerror("Copy Error", str(exc))
+
+    def batch_export(self) -> None:
+        """Export N random images based on the current mode."""
+        import os
+        import random as _rand
+
+        count = _show_batch_count_dialog(self.root)
+        if not count:
+            return
+
+        folder = filedialog.askdirectory(title="Choose a folder for exported images")
+        if not folder:
+            return
+
+        is_random = self._came_from_random
+        current_model = self.model_combo.get()
+
+        if is_random:
+            pool = [
+                m
+                for cat, models in self.model_data.items()
+                if cat != "Random"
+                for m in models
+            ]
+        else:
+            pool = [current_model]
+
+        prog = _BatchProgressDialog(self.root, count)
+        self.root.update()
+
+        saved = 0
+        for i in range(count):
+            if prog.cancelled:
+                break
+
+            model_name = _rand.choice(pool)
+            params = get_random_params(model_name)
+            if model_name == "Mapping":
+                params["show_labels"] = self._show_xy_labels
+
+            safe = model_name.lower().replace(" ", "_")
+            if is_random:
+                filename = f"random_{i + 1:03d}_{safe}.png"
+            else:
+                filename = f"{safe}_{i + 1:03d}.png"
+            filepath = os.path.join(folder, filename)
+
+            try:
+                self._render_graph_to_file(model_name, params, filepath)
+                saved += 1
+            except Exception as exc:
+                logger.error(f"Batch export error [{i + 1}]: {exc}", exc_info=True)
+
+            prog.update(i + 1, model_name)
+            self.root.update()
+
+        prog.destroy()
+
+        if saved > 0:
+            messagebox.showinfo(
+                "Batch Export Complete",
+                f"Exported {saved} image{'s' if saved != 1 else ''} to:\n{folder}")
+        elif not prog.cancelled:
+            messagebox.showerror("Batch Export Failed",
+                                 "No images could be exported.")
+
+    def _render_graph_to_file(self, model_name: str, params: dict,
+                               filepath: str) -> None:
+        """Render a single graph to a PNG file using an off-screen Figure."""
+        fig = Figure(figsize=(7, 5.25), dpi=200)
+        fig.patch.set_facecolor(AppConstants.CANVAS_BG_COLOR)
+
+        _mx = AppConstants.CANVAS_PAPER_MARGIN
+        ax = fig.add_axes([_mx, 0.1, 1 - 2 * _mx, 0.82])
+        ax.set_facecolor("#ffffff")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_edgecolor("black")
+            spine.set_linewidth(1.0)
+
+        ctx = DrawingContext(
+            ax=ax,
+            line_width=self._line_width,
+            graph_color=self._graph_color,
+            show_grid=self._show_grid,
+            dot_style=self._dot_style,
+            show_vlt=False,
+            grid_style=self._grid_style,
+            params=params,
+        )
+
+        drawer = GraphRegistry.get_drawer(model_name)
+        if drawer:
+            drawer.draw(ctx)
+
+        fig.savefig(filepath, format="png", dpi=200, bbox_inches="tight",
+                    facecolor=AppConstants.CANVAS_BG_COLOR)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
