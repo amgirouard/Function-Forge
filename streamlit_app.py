@@ -36,20 +36,36 @@ from function_forge.validators import CoordinateValidator
 # Constants
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# UI-facing dropdown groups (collapsed from the full drawer list)
 MODEL_DATA: dict[str, list[str]] = {
-    "Graphs": [
-        "Linear",
-        "Smooth Curve",
-        "Reciprocal",
-        "Piecewise",
-        "Step Function",
-        "Parametric",
-        "Scatter Plot",
-    ],
+    "Graphs":   ["Linear", "Smooth Curve", "Piecewise", "Scatter Plot"],
     "Mappings": ["Mapping"],
 }
 
-_LT_OPTIONS  = ["Any", "Vertical", "Horizontal", "Proportional", "Non-Prop."]
+# Sub-type options for grouped graph types
+_CURVE_SUBTYPES     = ["Any", "Smooth Curve", "Reciprocal"]
+_PIECEWISE_SUBTYPES = ["Any", "Piecewise", "Step Function"]
+
+# All actual drawers (used for Random mode and Batch Export)
+_ALL_GRAPH_DRAWERS = [
+    "Linear", "Smooth Curve", "Reciprocal",
+    "Piecewise", "Step Function", "Parametric", "Scatter Plot",
+]
+_ALL_DRAWERS = _ALL_GRAPH_DRAWERS + ["Mapping"]
+
+# Reverse lookup: actual drawer → display group in dropdown
+_DRAWER_GROUP: dict[str, str] = {
+    "Linear":        "Linear",
+    "Smooth Curve":  "Smooth Curve",
+    "Reciprocal":    "Smooth Curve",
+    "Piecewise":     "Piecewise",
+    "Step Function": "Piecewise",
+    "Scatter Plot":  "Scatter Plot",
+    "Mapping":       "Mapping",
+    "Parametric":    "Parametric",   # only via Random
+}
+
+_LT_OPTIONS = ["Any", "Vertical", "Horizontal", "Proportional", "Non-Prop."]
 _LT_MAP: dict[str, str | None] = {
     "Any":          None,
     "Vertical":     "vertical",
@@ -62,6 +78,8 @@ _LT_REVERSE: dict[str | None, str] = {v: k for k, v in _LT_MAP.items()}
 _FN_LABELS  = ["Function", "Not a Fn", "Either"]
 _FN_MAP     = {"Function": "function", "Not a Fn": "not_function", "Either": "random"}
 _FN_REVERSE = {v: k for k, v in _FN_MAP.items()}
+
+_SENTINEL = object()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -81,25 +99,25 @@ st.set_page_config(
 
 def _init_state() -> None:
     defaults: dict = {
-        "category":      "Graphs",
-        "model":         "Linear",
-        "params":        {},
-        "fn_type":       "random",
-        "linear_type":   None,
-        "show_grid":     True,
-        "show_vlt":      False,
-        "dot_style":     "closed",
-        "grid_style":    "print",
-        "graph_color":   "#000000",
-        "line_width":    4.0,
-        "mapping_shape": "oval",
-        "show_xy_labels": True,
-        "scatter_text":  "",
-        # batch export sticky settings
+        "category":          "Graphs",
+        "graph_group":       "Linear",   # what the dropdown shows
+        "model":             "Linear",   # actual drawer name
+        "params":            {},
+        "fn_type":           "random",
+        "linear_type":       None,
+        "curve_subtype":     None,       # None | "Smooth Curve" | "Reciprocal"
+        "piecewise_subtype": None,       # None | "Piecewise" | "Step Function"
+        "show_grid":         True,
+        "grid_style":        "print",
+        "graph_color":       "#000000",
+        "line_width":        4.0,
+        "mapping_shape":     "oval",
+        "show_xy_labels":    True,
+        "scatter_text":      "",
         "batch_fn_type":      "random",
         "batch_display_type": "graph",
         "batch_count":        10,
-        "batch_zip":          None,   # bytes | None
+        "batch_zip":          None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -112,28 +130,53 @@ _init_state()
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _resolve_drawer(graph_group: str,
+                    curve_subtype: str | None,
+                    piecewise_subtype: str | None) -> str:
+    """Return the actual drawer name for a given group + sub-type selection."""
+    if graph_group == "Smooth Curve":
+        if curve_subtype == "Reciprocal":
+            return "Reciprocal"
+        if curve_subtype == "Smooth Curve":
+            return "Smooth Curve"
+        return random.choice(["Smooth Curve", "Reciprocal"])
+    if graph_group == "Piecewise":
+        if piecewise_subtype == "Step Function":
+            return "Step Function"
+        if piecewise_subtype == "Piecewise":
+            return "Piecewise"
+        return random.choice(["Piecewise", "Step Function"])
+    return graph_group  # Linear, Scatter Plot, Mapping, etc.
+
+
 def _regen(
-    model:       str | None = None,
-    linear_type: str | None = ...,   # type: ignore[assignment]  sentinel
-    fn_type:     str | None = None,
+    graph_group:       str | None = None,
+    linear_type:       object     = _SENTINEL,
+    curve_subtype:     object     = _SENTINEL,
+    piecewise_subtype: object     = _SENTINEL,
+    fn_type:           str | None = None,
 ) -> None:
-    """Generate new random params and store in session_state.params."""
-    m  = model    or st.session_state.model
-    ft = fn_type  or st.session_state.fn_type
-    lt = st.session_state.linear_type if linear_type is ... else linear_type  # type: ignore[comparison-overlap]
+    """Resolve the actual drawer, generate params, store in session_state."""
+    gg = graph_group or st.session_state.graph_group
+    ft = fn_type     or st.session_state.fn_type
+    lt = st.session_state.linear_type       if linear_type       is _SENTINEL else linear_type
+    cs = st.session_state.curve_subtype     if curve_subtype     is _SENTINEL else curve_subtype
+    ps = st.session_state.piecewise_subtype if piecewise_subtype is _SENTINEL else piecewise_subtype
+
+    actual = _resolve_drawer(gg, cs, ps)
+    st.session_state.model  = actual
     st.session_state.params = get_random_params(
-        m, fn_type=ft,
-        linear_type=lt if m == "Linear" else None,
+        actual, fn_type=ft,
+        linear_type=lt if actual == "Linear" else None,
     )
-    # Keep scatter text in sync
-    if m == "Scatter Plot":
+    if actual == "Scatter Plot":
         pts = st.session_state.params.get("points", [])
         st.session_state.scatter_text = CoordinateValidator.format_points(pts)
 
 
-def _render_figure(model: str, params: dict, *, line_width: float,
-                   graph_color: str, show_grid: bool, dot_style: str,
-                   show_vlt: bool, grid_style: str) -> Figure:
+def _render_figure(model: str, params: dict, *,
+                   line_width: float, graph_color: str,
+                   show_grid: bool, grid_style: str) -> Figure:
     """Create and return a rendered matplotlib Figure."""
     fig = Figure(figsize=(7, 5.25))
     fig.patch.set_facecolor("white")
@@ -145,8 +188,8 @@ def _render_figure(model: str, params: dict, *, line_width: float,
         line_width=line_width,
         graph_color=graph_color,
         show_grid=show_grid,
-        dot_style=dot_style,
-        show_vlt=show_vlt,
+        dot_style="closed",
+        show_vlt=False,
         grid_style=grid_style,
         params=params,
     )
@@ -161,17 +204,14 @@ def _render_figure(model: str, params: dict, *, line_width: float,
 def _build_batch_zip(count: int, fn_type: str, display_type: str) -> bytes:
     """Generate ``count`` graphs and return them as an in-memory ZIP."""
     if display_type == "graph":
-        pool = list(MODEL_DATA["Graphs"])
+        pool = list(_ALL_GRAPH_DRAWERS)
     elif display_type == "mapping":
         pool = ["Mapping"]
     else:
-        pool = [m for ms in MODEL_DATA.values() for m in ms]
+        pool = list(_ALL_DRAWERS)
 
-    # Filter by fn_type capability
-    capable = _FN_CAPABLE.get(fn_type, list(_FN_CAPABLE["random"]))
-    filtered = [m for m in pool if m in capable]
-    if not filtered:
-        filtered = pool
+    capable  = _FN_CAPABLE.get(fn_type, list(_FN_CAPABLE["random"]))
+    filtered = [m for m in pool if m in capable] or pool
 
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -181,8 +221,7 @@ def _build_batch_zip(count: int, fn_type: str, display_type: str) -> bytes:
             fig = _render_figure(
                 model_name, params,
                 line_width=4.0, graph_color="#000000",
-                show_grid=True, dot_style="closed",
-                show_vlt=False, grid_style="print",
+                show_grid=True, grid_style="print",
             )
             img = BytesIO()
             fig.savefig(img, format="png", dpi=200,
@@ -210,101 +249,152 @@ with st.sidebar:
     category = st.selectbox("Category", all_cats, index=cat_idx)
 
     if category != st.session_state.category:
-        st.session_state.category    = category
-        st.session_state.linear_type = None
-        # Auto-pick first model in new category (or keep for Random)
+        st.session_state.category          = category
+        st.session_state.linear_type       = None
+        st.session_state.curve_subtype     = None
+        st.session_state.piecewise_subtype = None
         if category != "Random":
             first = MODEL_DATA.get(category, ["Linear"])[0]
-            st.session_state.model = first
-            _regen(model=first)
+            st.session_state.graph_group = first
+            _regen(graph_group=first,
+                   linear_type=None, curve_subtype=None, piecewise_subtype=None)
 
-    # ── Random category controls ──────────────────────────────────────────────
+    # ── Random category ───────────────────────────────────────────────────────
     if category == "Random":
-        fn_label_r = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+        # Function type — single column
+        fn_label_r  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
         fn_choice_r = st.radio(
-            "Type", _FN_LABELS, horizontal=True,
+            "Type", _FN_LABELS,
             index=_FN_LABELS.index(fn_label_r),
             key="fn_radio_random",
         )
         st.session_state.fn_type = _FN_MAP[fn_choice_r]
 
-        col1, col2, col3 = st.columns(3)
-        if col1.button("⟳ Random", use_container_width=True):
-            all_models = [m for ms in MODEL_DATA.values() for m in ms]
-            capable    = _FN_CAPABLE.get(st.session_state.fn_type,
-                                          list(_FN_CAPABLE["random"]))
-            pool = [m for m in all_models if m in capable] or all_models
+        # Buttons — single column
+        capable = _FN_CAPABLE.get(st.session_state.fn_type,
+                                   list(_FN_CAPABLE["random"]))
+        if st.button("⟳ Random", use_container_width=True):
+            pool = [m for m in _ALL_DRAWERS if m in capable] or _ALL_DRAWERS
             m = random.choice(pool)
-            st.session_state.model = m
-            _regen(model=m)
-        if col2.button("⟳ Graph", use_container_width=True):
-            capable = _FN_CAPABLE.get(st.session_state.fn_type,
-                                       list(_FN_CAPABLE["random"]))
-            pool = [m for m in MODEL_DATA["Graphs"] if m in capable] \
-                   or MODEL_DATA["Graphs"]
-            m = random.choice(pool)
-            st.session_state.model = m
-            _regen(model=m)
-        if col3.button("⟳ Mapping", use_container_width=True):
-            st.session_state.model = "Mapping"
-            _regen(model="Mapping")
+            st.session_state.graph_group = _DRAWER_GROUP.get(m, m)
+            st.session_state.model       = m
+            st.session_state.params      = get_random_params(
+                m, fn_type=st.session_state.fn_type)
 
-    # ── Normal category: model selector + New Graph ───────────────────────────
+        if st.button("⟳ Graph", use_container_width=True):
+            pool = [m for m in _ALL_GRAPH_DRAWERS if m in capable] \
+                   or _ALL_GRAPH_DRAWERS
+            m = random.choice(pool)
+            st.session_state.graph_group = _DRAWER_GROUP.get(m, m)
+            st.session_state.model       = m
+            st.session_state.params      = get_random_params(
+                m, fn_type=st.session_state.fn_type)
+
+        if st.button("⟳ Mapping", use_container_width=True):
+            st.session_state.graph_group = "Mapping"
+            st.session_state.model       = "Mapping"
+            st.session_state.params      = get_random_params(
+                "Mapping", fn_type=st.session_state.fn_type)
+
+    # ── Normal category ───────────────────────────────────────────────────────
     else:
-        models   = MODEL_DATA.get(category, [])
-        prev_mdl = st.session_state.model
-        mdl_idx  = models.index(prev_mdl) if prev_mdl in models else 0
-        model    = st.selectbox("Graph Type", models, index=mdl_idx)
+        models      = MODEL_DATA.get(category, [])
+        prev_group  = st.session_state.graph_group
+        group_idx   = models.index(prev_group) if prev_group in models else 0
+        graph_group = st.selectbox("Graph Type", models, index=group_idx)
 
-        if model != prev_mdl:
-            st.session_state.model       = model
-            st.session_state.linear_type = None
-            _regen(model=model)
+        if graph_group != prev_group:
+            st.session_state.graph_group       = graph_group
+            st.session_state.linear_type       = None
+            st.session_state.curve_subtype     = None
+            st.session_state.piecewise_subtype = None
+            _regen(graph_group=graph_group,
+                   linear_type=None, curve_subtype=None, piecewise_subtype=None)
 
-        if st.button("⟳ New Graph", use_container_width=True):
-            _regen()
-
-        # ── Linear line-type selector ─────────────────────────────────────────
-        if model == "Linear":
-            st.markdown("**Line Type**")
-            cur_lt    = st.session_state.linear_type
-            lt_label  = _LT_REVERSE.get(cur_lt, "Any")
+        # ── Linear: sub-types → New Graph ─────────────────────────────────────
+        if graph_group == "Linear":
+            cur_lt   = st.session_state.linear_type
+            lt_label = _LT_REVERSE.get(cur_lt, "Any")
             lt_choice = st.radio(
-                "line_type_radio", _LT_OPTIONS,
+                "Line Type", _LT_OPTIONS,
                 index=_LT_OPTIONS.index(lt_label),
-                horizontal=True,
-                label_visibility="collapsed",
+                key="lt_radio",
             )
             new_lt = _LT_MAP[lt_choice]
             if new_lt != st.session_state.linear_type:
                 st.session_state.linear_type = new_lt
                 _regen(linear_type=new_lt)
 
-    # ── Common options ────────────────────────────────────────────────────────
-    st.divider()
-    st.markdown("**Options**")
+            if st.button("⟳ New Graph", use_container_width=True):
+                _regen()
 
-    _model = st.session_state.model
+        # ── Smooth Curve: sub-types → New Graph ────────────────────────────────
+        elif graph_group == "Smooth Curve":
+            cur_cs    = st.session_state.curve_subtype
+            cs_label  = cur_cs if cur_cs in _CURVE_SUBTYPES else "Any"
+            cs_choice = st.radio(
+                "Curve Type", _CURVE_SUBTYPES,
+                index=_CURVE_SUBTYPES.index(cs_label),
+                key="cs_radio",
+            )
+            new_cs = None if cs_choice == "Any" else cs_choice
+            if new_cs != st.session_state.curve_subtype:
+                st.session_state.curve_subtype = new_cs
+                _regen(curve_subtype=new_cs)
 
-    st.session_state.show_grid = st.checkbox(
-        "Show Grid", value=st.session_state.show_grid)
+            if st.button("⟳ New Graph", use_container_width=True):
+                _regen()
 
-    if _model != "Mapping":
-        st.session_state.show_vlt = st.checkbox(
-            "Show VLT", value=st.session_state.show_vlt,
-            help="Overlay a Vertical Line Test indicator")
+        # ── Piecewise: sub-types → New Graph ───────────────────────────────────
+        elif graph_group == "Piecewise":
+            cur_ps    = st.session_state.piecewise_subtype
+            ps_label  = cur_ps if cur_ps in _PIECEWISE_SUBTYPES else "Any"
+            ps_choice = st.radio(
+                "Piece Type", _PIECEWISE_SUBTYPES,
+                index=_PIECEWISE_SUBTYPES.index(ps_label),
+                key="ps_radio",
+            )
+            new_ps = None if ps_choice == "Any" else ps_choice
+            if new_ps != st.session_state.piecewise_subtype:
+                st.session_state.piecewise_subtype = new_ps
+                _regen(piecewise_subtype=new_ps)
 
-    # Dot style
-    if _model != "Mapping":
-        dot_choice = st.radio(
-            "Endpoints", ["● Closed", "○ Open"], horizontal=True,
-            index=0 if st.session_state.dot_style == "closed" else 1,
-        )
-        st.session_state.dot_style = "closed" if "Closed" in dot_choice else "open"
+            if st.button("⟳ New Graph", use_container_width=True):
+                _regen()
 
-    # Grid style (print vs colour)
-    if _model != "Mapping":
-        prev_gs  = st.session_state.grid_style
+        # ── Scatter Plot ───────────────────────────────────────────────────────
+        elif graph_group == "Scatter Plot":
+            if st.button("⟳ New Graph", use_container_width=True):
+                _regen()
+
+        # ── Mapping: fn type → New Mapping ────────────────────────────────────
+        elif graph_group == "Mapping":
+            fn_label_m  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_choice_m = st.radio(
+                "Function Type", _FN_LABELS,
+                index=_FN_LABELS.index(fn_label_m),
+                key="fn_radio_mapping",
+            )
+            new_ft_m = _FN_MAP[fn_choice_m]
+            if new_ft_m != st.session_state.fn_type:
+                st.session_state.fn_type = new_ft_m
+                _regen(fn_type=new_ft_m)
+
+            if st.button("⟳ New Mapping", use_container_width=True):
+                _regen()
+
+    # ── Options ───────────────────────────────────────────────────────────────
+    _model    = st.session_state.model
+    _category = st.session_state.category
+
+    # Show Grid — hidden for Mapping and Random
+    if _model != "Mapping" and _category != "Random":
+        st.divider()
+        st.markdown("**Options**")
+        st.session_state.show_grid = st.checkbox(
+            "Show Grid", value=st.session_state.show_grid)
+
+        prev_gs   = st.session_state.grid_style
         gs_choice = st.radio(
             "Style", ["Print", "Color"], horizontal=True,
             index=0 if prev_gs == "print" else 1,
@@ -322,8 +412,10 @@ with st.sidebar:
             "Line Weight", 0.5, 5.0,
             value=float(st.session_state.line_width), step=0.5)
 
-    # Mapping-specific options
-    if _model == "Mapping":
+    # Mapping options — Shape and X/Y label (hidden in Random)
+    if _model == "Mapping" and _category != "Random":
+        st.divider()
+        st.markdown("**Options**")
         shape_choice = st.radio(
             "Shape", ["Oval", "Rectangle"], horizontal=True,
             index=0 if st.session_state.mapping_shape == "oval" else 1,
@@ -340,24 +432,25 @@ with st.sidebar:
             if "show_labels" in st.session_state.params:
                 st.session_state.params["show_labels"] = new_xy
 
-    # Function type (only for "either" models)
-    support = _FN_SUPPORT.get(_model, "either")
-    if support == "either":
-        st.divider()
-        st.markdown("**Function Type**")
-        fn_label = _FN_REVERSE.get(st.session_state.fn_type, "Either")
-        fn_choice = st.radio(
-            "fn_type_radio", _FN_LABELS, horizontal=True,
-            index=_FN_LABELS.index(fn_label),
-            label_visibility="collapsed",
-        )
-        new_ft = _FN_MAP[fn_choice]
-        if new_ft != st.session_state.fn_type:
-            st.session_state.fn_type = new_ft
-            _regen(fn_type=new_ft)
+    # Function type — Graphs category only, for "either" models
+    if _category == "Graphs" and _model != "Mapping":
+        support = _FN_SUPPORT.get(_model, "either")
+        if support == "either":
+            st.divider()
+            st.markdown("**Function Type**")
+            fn_label  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_choice = st.radio(
+                "fn_type_radio", _FN_LABELS, horizontal=True,
+                index=_FN_LABELS.index(fn_label),
+                label_visibility="collapsed",
+            )
+            new_ft = _FN_MAP[fn_choice]
+            if new_ft != st.session_state.fn_type:
+                st.session_state.fn_type = new_ft
+                _regen(fn_type=new_ft)
 
-    # Scatter Plot: coordinate entry
-    if _model == "Scatter Plot":
+    # Scatter Plot coordinate entry
+    if _model == "Scatter Plot" and _category != "Random":
         st.divider()
         st.markdown("**Points**")
         scatter_text = st.text_input(
@@ -374,10 +467,7 @@ with st.sidebar:
         elif pts:
             st.session_state.params = {"points": pts}
 
-        if st.button("⟳ Randomize Points", use_container_width=True):
-            _regen()
-
-    # ── Batch Export ─────────────────────────────────────────────────────────
+    # ── Batch Export ──────────────────────────────────────────────────────────
     st.divider()
     with st.expander("Batch Export"):
         b_count = st.number_input(
@@ -425,7 +515,6 @@ with st.sidebar:
 # Main area — graph display
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Ensure params exist before rendering
 if not st.session_state.params:
     _regen()
 
@@ -438,14 +527,11 @@ try:
         line_width=st.session_state.line_width,
         graph_color=st.session_state.graph_color,
         show_grid=st.session_state.show_grid,
-        dot_style=st.session_state.dot_style,
-        show_vlt=st.session_state.show_vlt if model != "Mapping" else False,
         grid_style=st.session_state.grid_style,
     )
 
     st.pyplot(fig, use_container_width=True)
 
-    # Download current graph as PNG
     png_buf = BytesIO()
     fig.savefig(png_buf, format="png", dpi=200,
                 bbox_inches="tight", pad_inches=0.05,
