@@ -1418,8 +1418,8 @@ class FunctionApp:
             return
         try:
             is_svg = filepath.lower().endswith(".svg")
-            kwargs = dict(bbox_inches="tight",
-                          facecolor=AppConstants.CANVAS_BG_COLOR)
+            kwargs = dict(bbox_inches="tight", pad_inches=0.05,
+                          facecolor="white")
             if not is_svg:
                 kwargs["dpi"] = 200
             self.fig.savefig(filepath, **kwargs)
@@ -1430,7 +1430,7 @@ class FunctionApp:
         try:
             buf = BytesIO()
             self.fig.savefig(buf, format="png", dpi=200, bbox_inches="tight",
-                             facecolor=AppConstants.CANVAS_BG_COLOR)
+                             pad_inches=0.05, facecolor="white")
             buf.seek(0)
             if platform.system() == "Darwin":
                 process = subprocess.Popen(
@@ -1534,7 +1534,7 @@ class FunctionApp:
                                filepath: str) -> None:
         """Render a single graph to a PNG file using an off-screen Figure."""
         fig = Figure(figsize=(7, 5.25), dpi=200)
-        fig.patch.set_facecolor(AppConstants.CANVAS_BG_COLOR)
+        fig.patch.set_facecolor("white")
 
         _mx = AppConstants.CANVAS_PAPER_MARGIN
         ax = fig.add_axes([_mx, 0.1, 1 - 2 * _mx, 0.82])
@@ -1562,7 +1562,7 @@ class FunctionApp:
             drawer.draw(ctx)
 
         fig.savefig(filepath, format="png", dpi=200, bbox_inches="tight",
-                    facecolor=AppConstants.CANVAS_BG_COLOR)
+                    pad_inches=0.05, facecolor="white")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
