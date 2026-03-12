@@ -391,16 +391,15 @@ class PiecewiseDrawer(GraphDrawer):
              "open_left": False, "open_right": False},
         ]
 
-    @classmethod
-    def random_params(cls) -> dict:
+    @staticmethod
+    def _random_fn_segments() -> list[dict]:
+        """Non-overlapping segments — always a function."""
         n_segs = random.randint(2, 3)
-        # Divide x-axis into n_segs non-overlapping ranges
         breakpoints = sorted(random.sample(range(-4, 5), n_segs - 1))
         xs = [LO + 1] + breakpoints + [HI - 1]
         segments = []
         for i in range(n_segs):
-            x0 = xs[i]
-            x1 = xs[i + 1]
+            x0, x1 = xs[i], xs[i + 1]
             y0 = random.randint(-4, 4)
             y1 = random.randint(-4, 4)
             open_r = (i < n_segs - 1) and random.choice([True, False])
@@ -408,7 +407,38 @@ class PiecewiseDrawer(GraphDrawer):
                 "x0": x0, "y0": y0, "x1": x1, "y1": y1,
                 "open_left": False, "open_right": open_r,
             })
-        return {"segments": segments}
+        return segments
+
+    @staticmethod
+    def _random_not_fn_segments() -> list[dict]:
+        """Segments with closed shared boundaries → same x maps to two y values → not a function."""
+        n_segs = random.randint(2, 3)
+        breakpoints = sorted(random.sample(range(-3, 4), n_segs - 1))
+        xs = [LO + 1] + breakpoints + [HI - 1]
+        segments = []
+        prev_y1 = None
+        for i in range(n_segs):
+            x0, x1 = xs[i], xs[i + 1]
+            # Ensure this segment's left y differs from prev segment's right y
+            y0 = random.randint(-4, 4)
+            if prev_y1 is not None:
+                while y0 == prev_y1:
+                    y0 = random.randint(-4, 4)
+            y1 = random.randint(-4, 4)
+            segments.append({
+                "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                "open_left": False, "open_right": False,
+            })
+            prev_y1 = y1
+        return segments
+
+    @classmethod
+    def random_params(cls, fn_type: str = "random") -> dict:
+        if fn_type == "not_function":
+            return {"segments": cls._random_not_fn_segments()}
+        if fn_type == "random" and random.random() < 0.5:
+            return {"segments": cls._random_not_fn_segments()}
+        return {"segments": cls._random_fn_segments()}
 
 
 @GraphRegistry.register("Step Function")
@@ -590,24 +620,26 @@ class ScatterPlotDrawer(GraphDrawer):
             self._draw_vlt(ctx, [pt[0] for pt in points])
 
     @classmethod
-    def random_params(cls) -> dict:
+    def random_params(cls, fn_type: str = "random") -> dict:
         n = random.randint(5, 10)
-        # Ensure no two points share an x-value (makes it a function)
-        is_function = random.choice([True, False])
+        if fn_type == "random":
+            is_function = random.choice([True, False])
+        else:
+            is_function = (fn_type == "function")
         if is_function:
             xs = random.sample(range(LO + 1, HI), min(n, HI - LO - 1))
             points = [(x, random.randint(LO + 1, HI - 1)) for x in xs]
         else:
-            points = []
-            used_x = set()
-            for _ in range(n):
-                x = random.randint(LO + 1, HI - 1)
-                y = random.randint(LO + 1, HI - 1)
-                # Occasionally reuse an x to create a non-function
-                if used_x and random.random() < 0.3:
-                    x = random.choice(list(used_x))
-                used_x.add(x)
-                points.append((x, y))
+            # Guarantee at least one x appears twice (definite non-function)
+            xs_pool = list(range(LO + 1, HI))
+            unique_count = min(n - 1, len(xs_pool))
+            unique_xs = random.sample(xs_pool, unique_count)
+            repeat_x = random.choice(unique_xs)
+            points = [(x, random.randint(LO + 1, HI - 1)) for x in unique_xs]
+            existing_y = next(y for x, y in points if x == repeat_x)
+            diff_y = random.choice([y for y in range(LO + 1, HI) if y != existing_y])
+            points.append((repeat_x, diff_y))
+            random.shuffle(points)
         return {"points": points}
 
 
@@ -809,7 +841,7 @@ class MappingDrawer(GraphDrawer):
         ctx.ax.figure.canvas.draw()
 
     @classmethod
-    def random_params(cls) -> dict:
+    def random_params(cls, fn_type: str = "random") -> dict:
         import random
         style = random.choice(["ones", "fives"])
         pool  = list(range(0, 21)) if style == "ones" else list(range(0, 101, 5))
@@ -819,7 +851,12 @@ class MappingDrawer(GraphDrawer):
         domain     = sorted(random.sample(pool, min(nd, len(pool))))
         range_vals = sorted(random.sample(pool, min(nr, len(pool))))
 
-        is_function = random.random() < 0.5
+        if fn_type == "function":
+            is_function = True
+        elif fn_type == "not_function":
+            is_function = False
+        else:
+            is_function = random.random() < 0.5
 
         out_count = [0] * nd
         in_count  = [0] * nr
@@ -940,12 +977,43 @@ _RANDOM_DRAWERS: dict[str, type] = {
     "Mapping":         MappingDrawer,
 }
 
+# ── Function-type classification ───────────────────────────────────────────────
 
-def get_random_params(graph_name: str) -> dict:
+# "function"     → always passes the vertical line test
+# "not_function" → always fails the vertical line test
+# "either"       → can be either depending on random params
+_FN_SUPPORT: dict[str, str] = {
+    "Linear":        "function",
+    "Smooth Curve":  "function",
+    "Reciprocal":    "function",
+    "Step Function": "function",
+    "Parametric":    "not_function",
+    "Piecewise":     "either",
+    "Scatter Plot":  "either",
+    "Mapping":       "either",
+}
+
+# Graph names eligible to be drawn for each fn_type filter
+_FN_CAPABLE: dict[str, list[str]] = {
+    "function": [
+        "Linear", "Smooth Curve", "Reciprocal", "Step Function",
+        "Piecewise", "Scatter Plot", "Mapping",
+    ],
+    "not_function": [
+        "Parametric", "Piecewise", "Scatter Plot", "Mapping",
+    ],
+    "random": list(_RANDOM_DRAWERS.keys()),
+}
+
+
+def get_random_params(graph_name: str, fn_type: str = "random") -> dict:
     """Return randomly generated params for the given graph type."""
     klass = _RANDOM_DRAWERS.get(graph_name)
     if klass and hasattr(klass, "random_params"):
-        return klass.random_params()
+        try:
+            return klass.random_params(fn_type=fn_type)
+        except TypeError:
+            return klass.random_params()
     return {}
 
 

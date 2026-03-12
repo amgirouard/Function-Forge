@@ -20,7 +20,8 @@ import numpy as np
 
 from .models import AppConstants, DrawingContext, GraphConfigProvider
 from .validators import CoordinateValidator
-from .drawers import GraphRegistry, get_random_params, random_graph_name
+from .drawers import (GraphRegistry, get_random_params, random_graph_name,
+                       _FN_SUPPORT, _FN_CAPABLE)
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,10 @@ class _Tooltip:
 # Batch Export helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _show_batch_count_dialog(parent: tk.Widget) -> "int | None":
-    """Modal dialog asking how many images to export. Returns count or None."""
+def _show_batch_count_dialog(parent: tk.Widget,
+                              default_fn_type: str = "random") -> "dict | None":
+    """Modal dialog asking how many images to export and what function type.
+    Returns {"count": int, "fn_type": str} or None."""
     result: list = [None]
     dlg = tk.Toplevel(parent)
     dlg.title("Batch Export")
@@ -102,6 +105,44 @@ def _show_batch_count_dialog(parent: tk.Widget) -> "int | None":
     tk.Spinbox(custom_frame, from_=1, to=500, textvariable=count_var,
                width=6, font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT)
 
+    # Function type selector
+    tk.Label(dlg, text="Function type:",
+             bg=bg, font=("Arial", 10, "bold")).pack(pady=(4, 4), padx=20)
+    fn_type_var = tk.StringVar(value=default_fn_type)
+    fn_type_frame = tk.Frame(dlg, bg=bg)
+    fn_type_frame.pack(pady=(0, 12), padx=20)
+
+    _dlg_fn_btns: dict = {}
+
+    def _set_dlg_fn_type(ft: str) -> None:
+        fn_type_var.set(ft)
+        for k, btn in _dlg_fn_btns.items():
+            btn.set_active(k == ft)
+
+    _dlg_fn_btns["function"] = _StyledButton(
+        fn_type_frame, text="Function",
+        font=AppConstants.scaled_btn_font(),
+        width=72, height=BTN_H,
+        active=(default_fn_type == "function"),
+        command=lambda: _set_dlg_fn_type("function"))
+    _dlg_fn_btns["function"].pack(side=tk.LEFT, padx=(0, 2))
+
+    _dlg_fn_btns["not_function"] = _StyledButton(
+        fn_type_frame, text="Not a Fn",
+        font=AppConstants.scaled_btn_font(),
+        width=72, height=BTN_H,
+        active=(default_fn_type == "not_function"),
+        command=lambda: _set_dlg_fn_type("not_function"))
+    _dlg_fn_btns["not_function"].pack(side=tk.LEFT, padx=(0, 2))
+
+    _dlg_fn_btns["random"] = _StyledButton(
+        fn_type_frame, text="Either",
+        font=AppConstants.scaled_btn_font(),
+        width=52, height=BTN_H,
+        active=(default_fn_type == "random"),
+        command=lambda: _set_dlg_fn_type("random"))
+    _dlg_fn_btns["random"].pack(side=tk.LEFT)
+
     action_frame = tk.Frame(dlg, bg=bg)
     action_frame.pack(pady=(0, 16), padx=20)
 
@@ -109,7 +150,7 @@ def _show_batch_count_dialog(parent: tk.Widget) -> "int | None":
         try:
             n = int(count_var.get())
             if n >= 1:
-                result[0] = n
+                result[0] = {"count": n, "fn_type": fn_type_var.get()}
         except (ValueError, tk.TclError):
             pass
         dlg.destroy()
@@ -198,6 +239,7 @@ class FunctionApp:
         self._mapping_shape: str = "oval"     # "oval" | "rectangle"
         self._came_from_random: bool = False
         self._show_vlt: bool     = False
+        self._fn_type: str       = "random"   # "function" | "not_function" | "random"
         self._grid_style: str    = "print"    # "print" | "color"
         self._show_xy_labels: bool = True
         self._current_params: dict = {}
@@ -360,6 +402,33 @@ class FunctionApp:
             command=lambda: self._fire_random(category="Mappings"))
         self.random_mapping_btn.grid(row=0, column=2, padx=6)
 
+        # Function type row in random mode
+        rnd_fn_row = tk.Frame(self.random_controls, bg=AppConstants.BG_COLOR)
+        rnd_fn_row.grid(row=1, column=0, columnspan=3, pady=(4, 0))
+        tk.Label(rnd_fn_row, text="Type:", bg=AppConstants.BG_COLOR,
+                 font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT, padx=(0, 6))
+
+        self._rnd_fn_function_btn = _StyledButton(
+            rnd_fn_row, text="Function",
+            font=AppConstants.scaled_btn_font(),
+            width=68, active=False,
+            command=lambda: self._set_fn_type("function"))
+        self._rnd_fn_function_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self._rnd_fn_not_btn = _StyledButton(
+            rnd_fn_row, text="Not a Fn",
+            font=AppConstants.scaled_btn_font(),
+            width=68, active=False,
+            command=lambda: self._set_fn_type("not_function"))
+        self._rnd_fn_not_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self._rnd_fn_either_btn = _StyledButton(
+            rnd_fn_row, text="Either",
+            font=AppConstants.scaled_btn_font(),
+            width=52, active=True,
+            command=lambda: self._set_fn_type("random"))
+        self._rnd_fn_either_btn.pack(side=tk.LEFT)
+
     def _build_input_panel(self) -> None:
         """Coordinate entry for scatter/discrete; param display for line graphs."""
         frame = self.col_inputs
@@ -493,6 +562,36 @@ class FunctionApp:
             active=False,
             command=lambda: self._set_dot_style("open"))
         self._dot_open_btn.pack(side=tk.LEFT)
+
+        # Function type selector
+        self._fn_type_label = tk.Label(frame, text="Type:", bg=bg,
+                                        font=AppConstants.scaled_btn_font())
+        self._fn_type_label.grid(row=7, column=0, sticky="w", pady=(6, 0))
+
+        fn_type_row = tk.Frame(frame, bg=bg)
+        fn_type_row.grid(row=8, column=0, columnspan=2, sticky="w", pady=2)
+        self._fn_type_row = fn_type_row
+
+        self._fn_function_btn = _StyledButton(
+            fn_type_row, text="Function",
+            font=AppConstants.scaled_btn_font(),
+            width=68, active=False,
+            command=lambda: self._set_fn_type("function"))
+        self._fn_function_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self._fn_not_btn = _StyledButton(
+            fn_type_row, text="Not a Fn",
+            font=AppConstants.scaled_btn_font(),
+            width=68, active=False,
+            command=lambda: self._set_fn_type("not_function"))
+        self._fn_not_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self._fn_either_btn = _StyledButton(
+            fn_type_row, text="Either",
+            font=AppConstants.scaled_btn_font(),
+            width=52, active=True,
+            command=lambda: self._set_fn_type("random"))
+        self._fn_either_btn.pack(side=tk.LEFT)
 
     def _build_style_panel(self) -> None:
         frame = self.col_style
@@ -851,14 +950,26 @@ class FunctionApp:
     # ── Category / Model selection ────────────────────────────────────────────
 
     def _fire_random(self, category: str | None = None) -> None:
-        """Pick and draw a completely random type, optionally filtered by category."""
+        """Pick and draw a completely random type, filtered by category and fn_type."""
         import random as _rand
+        fn_capable = _FN_CAPABLE.get(self._fn_type, list(_FN_CAPABLE["random"]))
         all_types = [
             (c, m)
             for c, models in self.model_data.items()
             if c != "Random" and (category is None or c == category)
             for m in models
+            if m in fn_capable
         ]
+        # Fallback: if no types match the fn_type filter, use all types
+        if not all_types:
+            all_types = [
+                (c, m)
+                for c, models in self.model_data.items()
+                if c != "Random" and (category is None or c == category)
+                for m in models
+            ]
+        if not all_types:
+            return
         chosen_cat, chosen_model = _rand.choice(all_types)
         self._came_from_random = True
 
@@ -866,8 +977,8 @@ class FunctionApp:
         self.model_combo["values"] = self.model_data.get(chosen_cat, [])
         self.model_combo.set(chosen_model)
 
-        # Generate params just like _on_model_change does
-        self._current_params = get_random_params(chosen_model)
+        # Generate params respecting fn_type
+        self._current_params = get_random_params(chosen_model, fn_type=self._fn_type)
         if chosen_model == "Mapping":
             self._current_params["show_labels"] = self._show_xy_labels
             self._mapping_shape = self._current_params.get("shape", "oval")
@@ -1007,8 +1118,11 @@ class FunctionApp:
             self.col_style.grid()
             self.rerandom_btn.configure(text="⟳ New Graph")
 
+        # Update fn_type buttons for this model's capabilities
+        self._update_fn_type_buttons(model)
+
         # Generate initial random params
-        self._current_params = get_random_params(model)
+        self._current_params = get_random_params(model, fn_type=self._fn_type)
         if is_mapping:
             self._current_params["show_labels"] = self._show_xy_labels
             self._mapping_shape = self._current_params.get("shape", "oval")
@@ -1113,6 +1227,51 @@ class FunctionApp:
         self._dot_open_btn.set_active(style == "open")
         self._schedule_redraw()
 
+    def _set_fn_type(self, fn_type: str) -> None:
+        """Update fn_type and re-randomize to reflect the new setting."""
+        self._fn_type = fn_type
+        self._sync_fn_type_buttons()
+        if self._came_from_random:
+            self._fire_random()
+        else:
+            self._rerandomize_current()
+
+    def _sync_fn_type_buttons(self) -> None:
+        """Sync all fn_type button active states to self._fn_type."""
+        ft = self._fn_type
+        for fn_btn, not_btn, ei_btn in [
+            (self._fn_function_btn, self._fn_not_btn, self._fn_either_btn),
+            (self._rnd_fn_function_btn, self._rnd_fn_not_btn, self._rnd_fn_either_btn),
+        ]:
+            fn_btn.set_active(ft == "function")
+            not_btn.set_active(ft == "not_function")
+            ei_btn.set_active(ft == "random")
+
+    def _update_fn_type_buttons(self, model: str) -> None:
+        """Enable/disable fn_type buttons based on what the model supports."""
+        support = _FN_SUPPORT.get(model, "either")
+        if support == "function":
+            self._fn_function_btn.set_active(True)
+            self._fn_not_btn.set_active(False)
+            self._fn_either_btn.set_active(False)
+            self._fn_function_btn.set_disabled(False)
+            self._fn_not_btn.set_disabled(True)
+            self._fn_either_btn.set_disabled(True)
+        elif support == "not_function":
+            self._fn_function_btn.set_active(False)
+            self._fn_not_btn.set_active(True)
+            self._fn_either_btn.set_active(False)
+            self._fn_function_btn.set_disabled(True)
+            self._fn_not_btn.set_disabled(False)
+            self._fn_either_btn.set_disabled(True)
+        else:
+            self._fn_function_btn.set_disabled(False)
+            self._fn_not_btn.set_disabled(False)
+            self._fn_either_btn.set_disabled(False)
+            self._fn_function_btn.set_active(self._fn_type == "function")
+            self._fn_not_btn.set_active(self._fn_type == "not_function")
+            self._fn_either_btn.set_active(self._fn_type == "random")
+
     def _set_color(self, color: str, swatch_widget) -> None:
         self._graph_color = color
         if self._selected_swatch:
@@ -1153,7 +1312,7 @@ class FunctionApp:
     def _randomize_points(self) -> None:
         """Randomize points for scatter/discrete models."""
         model = self.model_combo.get()
-        params = get_random_params(model)
+        params = get_random_params(model, fn_type=self._fn_type)
         self._current_params = params
         pts = params.get("points", [])
         self.coord_entry.delete(0, tk.END)
@@ -1164,7 +1323,7 @@ class FunctionApp:
     def _rerandomize_current(self) -> None:
         """Generate new random params for the current graph type."""
         model = self.model_combo.get()
-        self._current_params = get_random_params(model)
+        self._current_params = get_random_params(model, fn_type=self._fn_type)
         if model == "Mapping":
             self._current_params["show_labels"] = self._show_xy_labels
             # Sync shape: use whatever random_params picked, update buttons
@@ -1304,9 +1463,11 @@ class FunctionApp:
         import os
         import random as _rand
 
-        count = _show_batch_count_dialog(self.root)
-        if not count:
+        result = _show_batch_count_dialog(self.root, default_fn_type=self._fn_type)
+        if not result:
             return
+        count = result["count"]
+        fn_type = result["fn_type"]
 
         folder = filedialog.askdirectory(title="Choose a folder for exported images")
         if not folder:
@@ -1316,12 +1477,17 @@ class FunctionApp:
         current_model = self.model_combo.get()
 
         if is_random:
+            fn_capable = _FN_CAPABLE.get(fn_type, list(_FN_CAPABLE["random"]))
             pool = [
                 m
                 for cat, models in self.model_data.items()
                 if cat != "Random"
                 for m in models
+                if m in fn_capable
             ]
+            if not pool:
+                pool = [m for cat, models in self.model_data.items()
+                        if cat != "Random" for m in models]
         else:
             pool = [current_model]
 
@@ -1334,7 +1500,7 @@ class FunctionApp:
                 break
 
             model_name = _rand.choice(pool)
-            params = get_random_params(model_name)
+            params = get_random_params(model_name, fn_type=fn_type)
             if model_name == "Mapping":
                 params["show_labels"] = self._show_xy_labels
 
