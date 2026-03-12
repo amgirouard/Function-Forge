@@ -280,6 +280,7 @@ class FunctionApp:
         self._came_from_random: bool = False
         self._show_vlt: bool     = False
         self._fn_type: str       = "random"   # "function" | "not_function" | "random"
+        self._linear_type: str | None = None  # "vertical" | "horizontal" | "proportional" | "non_proportional" | None
         self._grid_style: str    = "print"    # "print" | "color"
         self._show_xy_labels: bool = True
         self._current_params: dict = {}
@@ -523,6 +524,41 @@ class FunctionApp:
             width=120,
             command=self._rerandomize_current)
         self.rerandom_btn.grid(row=2, column=0, columnspan=2, pady=(4, 0))
+
+        # Linear line-type selector (only shown when Linear is selected)
+        self._linear_type_frame = tk.Frame(self.param_frame, bg=bg)
+        self._linear_type_frame.grid(row=3, column=0, columnspan=2, pady=(4, 0))
+        self._linear_type_frame.grid_remove()
+
+        lt_row1 = tk.Frame(self._linear_type_frame, bg=bg)
+        lt_row1.pack(pady=(0, 2))
+        self._lt_vert_btn = _StyledButton(
+            lt_row1, text="Vertical",
+            font=AppConstants.scaled_btn_font(),
+            width=82, active=False,
+            command=lambda: self._set_linear_type("vertical"))
+        self._lt_vert_btn.pack(side=tk.LEFT, padx=1)
+        self._lt_horiz_btn = _StyledButton(
+            lt_row1, text="Horizontal",
+            font=AppConstants.scaled_btn_font(),
+            width=82, active=False,
+            command=lambda: self._set_linear_type("horizontal"))
+        self._lt_horiz_btn.pack(side=tk.LEFT, padx=1)
+
+        lt_row2 = tk.Frame(self._linear_type_frame, bg=bg)
+        lt_row2.pack()
+        self._lt_prop_btn = _StyledButton(
+            lt_row2, text="Proportional",
+            font=AppConstants.scaled_btn_font(),
+            width=82, active=False,
+            command=lambda: self._set_linear_type("proportional"))
+        self._lt_prop_btn.pack(side=tk.LEFT, padx=1)
+        self._lt_nonprop_btn = _StyledButton(
+            lt_row2, text="Non-Prop.",
+            font=AppConstants.scaled_btn_font(),
+            width=82, active=False,
+            command=lambda: self._set_linear_type("non_proportional"))
+        self._lt_nonprop_btn.pack(side=tk.LEFT, padx=1)
 
     def _build_options_panel(self) -> None:
         frame = self.col_options
@@ -1158,11 +1194,21 @@ class FunctionApp:
             self.col_style.grid()
             self.rerandom_btn.configure(text="⟳ New Graph")
 
+        # Show linear type selector only for Linear graphs
+        if model == "Linear":
+            self._linear_type_frame.grid()
+        else:
+            self._linear_type_frame.grid_remove()
+            self._linear_type = None
+            self._sync_linear_type_buttons()
+
         # Update fn_type buttons for this model's capabilities
         self._update_fn_type_buttons(model)
 
         # Generate initial random params
-        self._current_params = get_random_params(model, fn_type=self._fn_type)
+        self._current_params = get_random_params(
+            model, fn_type=self._fn_type,
+            linear_type=self._linear_type if model == "Linear" else None)
         if is_mapping:
             self._current_params["show_labels"] = self._show_xy_labels
             self._mapping_shape = self._current_params.get("shape", "oval")
@@ -1201,9 +1247,15 @@ class FunctionApp:
         p = self._current_params
         lines = []
         if model == "Linear":
-            m = p.get("slope", 1)
-            b = p.get("intercept", 0)
-            lines.append(f"y = {m}x + {b}" if b != 0 else f"y = {m}x")
+            lt = p.get("line_type")
+            if lt == "vertical":
+                lines.append(f"x = {p.get('x_val', 0)}")
+            elif lt == "horizontal":
+                lines.append(f"y = {p.get('y_val', 0)}")
+            else:
+                m = p.get("slope", 1)
+                b = p.get("intercept", 0)
+                lines.append(f"y = {m}x + {b}" if b != 0 else f"y = {m}x")
         elif model == "Smooth Curve":
             lines.append(f"Type: {p.get('curve_type', '').title()}")
             lines.append(f"Amplitude: {p.get('amplitude', 1):.1f}")
@@ -1266,6 +1318,19 @@ class FunctionApp:
         self._dot_closed_btn.set_active(style == "closed")
         self._dot_open_btn.set_active(style == "open")
         self._schedule_redraw()
+
+    def _set_linear_type(self, lt: str) -> None:
+        """Toggle a linear line type; deselect if already active (back to random)."""
+        self._linear_type = None if self._linear_type == lt else lt
+        self._sync_linear_type_buttons()
+        self._rerandomize_current()
+
+    def _sync_linear_type_buttons(self) -> None:
+        lt = self._linear_type
+        self._lt_vert_btn.set_active(lt == "vertical")
+        self._lt_horiz_btn.set_active(lt == "horizontal")
+        self._lt_prop_btn.set_active(lt == "proportional")
+        self._lt_nonprop_btn.set_active(lt == "non_proportional")
 
     def _set_fn_type(self, fn_type: str) -> None:
         """Update fn_type and re-randomize to reflect the new setting."""
@@ -1363,7 +1428,9 @@ class FunctionApp:
     def _rerandomize_current(self) -> None:
         """Generate new random params for the current graph type."""
         model = self.model_combo.get()
-        self._current_params = get_random_params(model, fn_type=self._fn_type)
+        self._current_params = get_random_params(
+            model, fn_type=self._fn_type,
+            linear_type=self._linear_type if model == "Linear" else None)
         if model == "Mapping":
             self._current_params["show_labels"] = self._show_xy_labels
             # Sync shape: use whatever random_params picked, update buttons
