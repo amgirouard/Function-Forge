@@ -161,29 +161,68 @@ class GraphDrawer:
 
 @GraphRegistry.register("Linear")
 class LinearDrawer(GraphDrawer):
-    """y = mx + b over [-5, 5]."""
+    """y = mx + b over [-5, 5], plus vertical and horizontal special cases."""
 
     def draw(self, ctx: DrawingContext) -> None:
         self._setup_axes(ctx)
         ax = ctx.ax
         p = ctx.params
 
-        slope     = p.get("slope", 1.0)
-        intercept = p.get("intercept", 0.0)
+        line_type = p.get("line_type")  # "vertical" | "horizontal" | None
 
-        x = np.linspace(LO, HI, 400)
-        y = slope * x + intercept
-        # Only plot strictly in-range points — no boundary clipping artifacts
-        mask = (y >= LO) & (y <= HI)
-
-        if mask.any():
-            ax.plot(x[mask], y[mask], color=ctx.graph_color,
+        if line_type == "vertical":
+            x_val = p.get("x_val", 0.0)
+            x = np.full(400, float(x_val))
+            y = np.linspace(LO, HI, 400)
+            mask = np.ones(len(x), dtype=bool)
+            ax.plot(x, y, color=ctx.graph_color,
                     linewidth=ctx.line_width, zorder=4, solid_capstyle="round")
+            self._draw_chevron(ax, x_val, HI,  0,  1, ctx.graph_color, ctx.line_width)
+            self._draw_chevron(ax, x_val, LO,  0, -1, ctx.graph_color, ctx.line_width)
 
-        self._add_line_arrows(ax, x, y, mask, ctx.graph_color, ctx.line_width)
+        elif line_type == "horizontal":
+            y_val = p.get("y_val", 0.0)
+            x = np.linspace(LO, HI, 400)
+            y = np.full(400, float(y_val))
+            mask = np.ones(len(x), dtype=bool)
+            ax.plot(x, y, color=ctx.graph_color,
+                    linewidth=ctx.line_width, zorder=4, solid_capstyle="round")
+            self._draw_chevron(ax, HI, y_val,  1,  0, ctx.graph_color, ctx.line_width)
+            self._draw_chevron(ax, LO, y_val, -1,  0, ctx.graph_color, ctx.line_width)
+
+        else:
+            slope     = p.get("slope", 1.0)
+            intercept = p.get("intercept", 0.0)
+            x = np.linspace(LO, HI, 400)
+            y = slope * x + intercept
+            # Only plot strictly in-range points — no boundary clipping artifacts
+            mask = (y >= LO) & (y <= HI)
+            if mask.any():
+                ax.plot(x[mask], y[mask], color=ctx.graph_color,
+                        linewidth=ctx.line_width, zorder=4, solid_capstyle="round")
+            self._add_line_arrows(ax, x, y, mask, ctx.graph_color, ctx.line_width)
 
         if ctx.show_vlt:
             self._draw_vlt(ctx, list(x))
+
+    @staticmethod
+    def _draw_chevron(ax, tip_x, tip_y, dx, dy, color, lw):
+        """Draw a single chevron arrowhead at (tip_x, tip_y) pointing in (dx, dy)."""
+        import math
+        length = math.hypot(dx, dy)
+        if length == 0:
+            return
+        ux, uy = dx / length, dy / length
+        arm, angle_deg = 0.45, 35
+        for sign in (+1, -1):
+            a = math.radians(180 - sign * angle_deg)
+            ca, sa = math.cos(a), math.sin(a)
+            ax.plot(
+                [tip_x, tip_x + (ux * ca - uy * sa) * arm],
+                [tip_y, tip_y + (ux * sa + uy * ca) * arm],
+                color=color, linewidth=lw,
+                solid_capstyle="round", zorder=5
+            )
 
     @staticmethod
     def _add_line_arrows(ax, x, y, mask, color, lw):
@@ -266,7 +305,20 @@ class LinearDrawer(GraphDrawer):
         draw_chevron(vis_x[0], vis_y[0], -dx_st, -dy_st)
 
     @classmethod
-    def random_params(cls) -> dict:
+    def random_params(cls, line_type: str | None = None, **_) -> dict:
+        if line_type == "vertical":
+            x_val = random.choice([-4, -3, -2, -1, 1, 2, 3, 4])
+            return {"line_type": "vertical", "x_val": float(x_val)}
+        if line_type == "horizontal":
+            y_val = random.choice([-4, -3, -2, -1, 0, 1, 2, 3, 4])
+            return {"line_type": "horizontal", "y_val": float(y_val)}
+        if line_type == "proportional":
+            slope = random.choice([-3, -2, -1, -0.5, 0.5, 1, 2, 3])
+            return {"line_type": "proportional", "slope": slope, "intercept": 0.0}
+        if line_type == "non_proportional":
+            slope = random.choice([-3, -2, -1, -0.5, 0.5, 1, 2, 3])
+            intercept = random.choice([-3, -2, -1, 1, 2, 3])
+            return {"line_type": "non_proportional", "slope": slope, "intercept": float(intercept)}
         slope = random.choice([-3, -2, -1, -0.5, 0.5, 1, 2, 3])
         intercept = random.randint(-3, 3)
         return {"slope": slope, "intercept": intercept}
@@ -1006,10 +1058,13 @@ _FN_CAPABLE: dict[str, list[str]] = {
 }
 
 
-def get_random_params(graph_name: str, fn_type: str = "random") -> dict:
+def get_random_params(graph_name: str, fn_type: str = "random",
+                      linear_type: str | None = None) -> dict:
     """Return randomly generated params for the given graph type."""
     klass = _RANDOM_DRAWERS.get(graph_name)
     if klass and hasattr(klass, "random_params"):
+        if graph_name == "Linear" and linear_type is not None:
+            return klass.random_params(line_type=linear_type)
         try:
             return klass.random_params(fn_type=fn_type)
         except TypeError:
