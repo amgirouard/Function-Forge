@@ -78,13 +78,13 @@ _DRAWER_GROUP: dict[str, str] = {
     "Parametric":    "Parametric",   # only via Random
 }
 
-_LT_OPTIONS = ["Any", "Vertical", "Horizontal", "Proportional", "Non-Prop."]
+_LT_OPTIONS = ["Any", "Vertical", "Horizontal", "Proportional", "Non-Proportional"]
 _LT_MAP: dict[str, str | None] = {
-    "Any":          None,
-    "Vertical":     "vertical",
-    "Horizontal":   "horizontal",
-    "Proportional": "proportional",
-    "Non-Prop.":    "non_proportional",
+    "Any":              None,
+    "Vertical":         "vertical",
+    "Horizontal":       "horizontal",
+    "Proportional":     "proportional",
+    "Non-Proportional": "non_proportional",
 }
 _LT_REVERSE: dict[str | None, str] = {v: k for k, v in _LT_MAP.items()}
 
