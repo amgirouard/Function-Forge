@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import random
 import sys
+import threading
+import warnings
 import zipfile
 from io import BytesIO
 
@@ -19,8 +21,19 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# Force the non-interactive Agg backend before any other matplotlib import.
+# Required on headless servers (no display) and prevents fork-safety issues.
+import matplotlib
+matplotlib.use("Agg")
+
 import streamlit as st
 from matplotlib.figure import Figure
+
+# Suppress noisy matplotlib warnings that surface in the browser log
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
+# Single lock so concurrent Streamlit sessions don't collide in matplotlib
+_mpl_lock = threading.Lock()
 
 from function_forge.models import AppConstants, DrawingContext
 from function_forge.drawers import (
@@ -177,26 +190,27 @@ def _regen(
 def _render_figure(model: str, params: dict, *,
                    line_width: float, graph_color: str,
                    show_grid: bool, grid_style: str) -> Figure:
-    """Create and return a rendered matplotlib Figure."""
-    fig = Figure(figsize=(7, 5.25))
-    fig.patch.set_facecolor("white")
-    _mx = AppConstants.CANVAS_PAPER_MARGIN
-    ax  = fig.add_axes([_mx, _mx, 1 - 2 * _mx, 1 - 2 * _mx])
+    """Create and return a rendered matplotlib Figure (thread-safe)."""
+    with _mpl_lock:
+        fig = Figure(figsize=(7, 5.25))
+        fig.patch.set_facecolor("white")
+        _mx = AppConstants.CANVAS_PAPER_MARGIN
+        ax  = fig.add_axes([_mx, _mx, 1 - 2 * _mx, 1 - 2 * _mx])
 
-    ctx = DrawingContext(
-        ax=ax,
-        line_width=line_width,
-        graph_color=graph_color,
-        show_grid=show_grid,
-        dot_style="closed",
-        show_vlt=False,
-        grid_style=grid_style,
-        params=params,
-    )
+        ctx = DrawingContext(
+            ax=ax,
+            line_width=line_width,
+            graph_color=graph_color,
+            show_grid=show_grid,
+            dot_style="closed",
+            show_vlt=False,
+            grid_style=grid_style,
+            params=params,
+        )
 
-    drawer = GraphRegistry.get_drawer(model)
-    if drawer:
-        drawer.draw(ctx)
+        drawer = GraphRegistry.get_drawer(model)
+        if drawer:
+            drawer.draw(ctx)
 
     return fig
 
@@ -224,9 +238,11 @@ def _build_batch_zip(count: int, fn_type: str, display_type: str) -> bytes:
                 show_grid=True, grid_style="print",
             )
             img = BytesIO()
-            fig.savefig(img, format="png", dpi=200,
-                        bbox_inches="tight", pad_inches=0.05,
-                        facecolor="white")
+            with _mpl_lock:
+                fig.savefig(img, format="png", dpi=200,
+                            bbox_inches="tight", pad_inches=0.05,
+                            facecolor="white")
+                fig.clf()
             safe = model_name.lower().replace(" ", "_")
             zf.writestr(f"{safe}_{i + 1:03d}.png", img.getvalue())
 
@@ -536,6 +552,7 @@ try:
     fig.savefig(png_buf, format="png", dpi=200,
                 bbox_inches="tight", pad_inches=0.05,
                 facecolor="white")
+    fig.clf()
     st.download_button(
         "⬇ Download PNG",
         data=png_buf.getvalue(),
