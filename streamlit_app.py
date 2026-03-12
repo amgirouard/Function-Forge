@@ -88,8 +88,8 @@ _LT_MAP: dict[str, str | None] = {
 }
 _LT_REVERSE: dict[str | None, str] = {v: k for k, v in _LT_MAP.items()}
 
-_FN_LABELS  = ["Function", "Not a Fn", "Either"]
-_FN_MAP     = {"Function": "function", "Not a Fn": "not_function", "Either": "random"}
+_FN_LABELS  = ["Function", "Not a Function", "Either"]
+_FN_MAP     = {"Function": "function", "Not a Function": "not_function", "Either": "random"}
 _FN_REVERSE = {v: k for k, v in _FN_MAP.items()}
 
 _SENTINEL = object()
@@ -380,8 +380,35 @@ with st.sidebar:
 
         # ── Scatter Plot ───────────────────────────────────────────────────────
         elif graph_group == "Scatter Plot":
+            fn_label_s  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_choice_s = st.radio(
+                "Function Type", _FN_LABELS,
+                index=_FN_LABELS.index(fn_label_s),
+                key="fn_radio_scatter",
+            )
+            new_ft_s = _FN_MAP[fn_choice_s]
+            if new_ft_s != st.session_state.fn_type:
+                st.session_state.fn_type = new_ft_s
+                _regen(fn_type=new_ft_s)
+
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
+
+            st.divider()
+            st.markdown("**Points**")
+            scatter_text = st.text_input(
+                "Coordinates",
+                value=st.session_state.scatter_text,
+                placeholder="(1,2), (-3,4), (0,-1)",
+            )
+            if scatter_text != st.session_state.scatter_text:
+                st.session_state.scatter_text = scatter_text
+            pts, err = (CoordinateValidator.parse(scatter_text)
+                        if scatter_text.strip() else (None, None))
+            if err:
+                st.error(err)
+            elif pts:
+                st.session_state.params = {"points": pts}
 
         # ── Mapping: fn type → New Mapping ────────────────────────────────────
         elif graph_group == "Mapping":
@@ -410,23 +437,24 @@ with st.sidebar:
         st.session_state.show_grid = st.checkbox(
             "Show Grid", value=st.session_state.show_grid)
 
-        prev_gs   = st.session_state.grid_style
-        gs_choice = st.radio(
-            "Style", ["Print", "Color"], horizontal=True,
-            index=0 if prev_gs == "print" else 1,
-        )
-        new_gs = "print" if gs_choice == "Print" else "color"
-        if new_gs != prev_gs:
-            st.session_state.grid_style  = new_gs
-            st.session_state.graph_color = "#000000" if new_gs == "print" else "#2563EB"
+        if _model != "Scatter Plot":
+            prev_gs   = st.session_state.grid_style
+            gs_choice = st.radio(
+                "Style", ["Print", "Color"], horizontal=True,
+                index=0 if prev_gs == "print" else 1,
+            )
+            new_gs = "print" if gs_choice == "Print" else "color"
+            if new_gs != prev_gs:
+                st.session_state.grid_style  = new_gs
+                st.session_state.graph_color = "#000000" if new_gs == "print" else "#2563EB"
 
-        if st.session_state.grid_style == "color":
-            st.session_state.graph_color = st.color_picker(
-                "Line Color", value=st.session_state.graph_color)
+            if st.session_state.grid_style == "color":
+                st.session_state.graph_color = st.color_picker(
+                    "Line Color", value=st.session_state.graph_color)
 
-        st.session_state.line_width = st.slider(
-            "Line Weight", 0.5, 5.0,
-            value=float(st.session_state.line_width), step=0.5)
+            st.session_state.line_width = st.slider(
+                "Line Weight", 0.5, 5.0,
+                value=float(st.session_state.line_width), step=0.5)
 
     # Mapping options — Shape and X/Y label (hidden in Random)
     if _model == "Mapping" and _category != "Random":
@@ -448,8 +476,8 @@ with st.sidebar:
             if "show_labels" in st.session_state.params:
                 st.session_state.params["show_labels"] = new_xy
 
-    # Function type — Graphs category only, for "either" models
-    if _category == "Graphs" and _model != "Mapping":
+    # Function type — Graphs category only, for "either" models (not Scatter Plot — handled inline)
+    if _category == "Graphs" and _model not in ("Mapping", "Scatter Plot"):
         support = _FN_SUPPORT.get(_model, "either")
         if support == "either":
             st.divider()
@@ -464,24 +492,6 @@ with st.sidebar:
             if new_ft != st.session_state.fn_type:
                 st.session_state.fn_type = new_ft
                 _regen(fn_type=new_ft)
-
-    # Scatter Plot coordinate entry
-    if _model == "Scatter Plot" and _category != "Random":
-        st.divider()
-        st.markdown("**Points**")
-        scatter_text = st.text_input(
-            "Coordinates",
-            value=st.session_state.scatter_text,
-            placeholder="(1,2), (-3,4), (0,-1)",
-        )
-        if scatter_text != st.session_state.scatter_text:
-            st.session_state.scatter_text = scatter_text
-        pts, err = (CoordinateValidator.parse(scatter_text)
-                    if scatter_text.strip() else (None, None))
-        if err:
-            st.error(err)
-        elif pts:
-            st.session_state.params = {"points": pts}
 
     # ── Batch Export ──────────────────────────────────────────────────────────
     st.divider()
@@ -501,7 +511,7 @@ with st.sidebar:
         st.session_state.batch_display_type = b_disp_choice.lower()
 
         b_fn_choice = st.radio(
-            "Type", ["Function", "Not a Fn", "Mixed"],
+            "Type", ["Function", "Not a Function", "Mixed"],
             horizontal=True,
             index=["function", "not_function", "random"].index(
                 st.session_state.batch_fn_type),
