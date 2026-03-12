@@ -72,9 +72,10 @@ class _Tooltip:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _show_batch_count_dialog(parent: tk.Widget,
-                              default_fn_type: str = "random") -> "dict | None":
+                              default_fn_type: str = "random",
+                              default_display_type: str = "mixed") -> "dict | None":
     """Modal dialog asking how many images to export and what function type.
-    Returns {"count": int, "fn_type": str} or None."""
+    Returns {"count": int, "fn_type": str, "display_type": str} or None."""
     result: list = [None]
     dlg = tk.Toplevel(parent)
     dlg.title("Batch Export")
@@ -104,6 +105,44 @@ def _show_batch_count_dialog(parent: tk.Widget,
              font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT, padx=(0, 6))
     tk.Spinbox(custom_frame, from_=1, to=500, textvariable=count_var,
                width=6, font=AppConstants.scaled_btn_font()).pack(side=tk.LEFT)
+
+    # Display type selector
+    tk.Label(dlg, text="Display type:",
+             bg=bg, font=("Arial", 10, "bold")).pack(pady=(4, 4), padx=20)
+    display_type_var = tk.StringVar(value=default_display_type)
+    display_type_frame = tk.Frame(dlg, bg=bg)
+    display_type_frame.pack(pady=(0, 8), padx=20)
+
+    _dlg_disp_btns: dict = {}
+
+    def _set_dlg_display_type(dt: str) -> None:
+        display_type_var.set(dt)
+        for k, btn in _dlg_disp_btns.items():
+            btn.set_active(k == dt)
+
+    _dlg_disp_btns["graph"] = _StyledButton(
+        display_type_frame, text="Graph",
+        font=AppConstants.scaled_btn_font(),
+        width=68, height=BTN_H,
+        active=(default_display_type == "graph"),
+        command=lambda: _set_dlg_display_type("graph"))
+    _dlg_disp_btns["graph"].pack(side=tk.LEFT, padx=(0, 2))
+
+    _dlg_disp_btns["mapping"] = _StyledButton(
+        display_type_frame, text="Mapping",
+        font=AppConstants.scaled_btn_font(),
+        width=72, height=BTN_H,
+        active=(default_display_type == "mapping"),
+        command=lambda: _set_dlg_display_type("mapping"))
+    _dlg_disp_btns["mapping"].pack(side=tk.LEFT, padx=(0, 2))
+
+    _dlg_disp_btns["mixed"] = _StyledButton(
+        display_type_frame, text="Mixed",
+        font=AppConstants.scaled_btn_font(),
+        width=60, height=BTN_H,
+        active=(default_display_type == "mixed"),
+        command=lambda: _set_dlg_display_type("mixed"))
+    _dlg_disp_btns["mixed"].pack(side=tk.LEFT)
 
     # Function type selector
     tk.Label(dlg, text="Function type:",
@@ -136,9 +175,9 @@ def _show_batch_count_dialog(parent: tk.Widget,
     _dlg_fn_btns["not_function"].pack(side=tk.LEFT, padx=(0, 2))
 
     _dlg_fn_btns["random"] = _StyledButton(
-        fn_type_frame, text="Either",
+        fn_type_frame, text="Mixed",
         font=AppConstants.scaled_btn_font(),
-        width=52, height=BTN_H,
+        width=60, height=BTN_H,
         active=(default_fn_type == "random"),
         command=lambda: _set_dlg_fn_type("random"))
     _dlg_fn_btns["random"].pack(side=tk.LEFT)
@@ -150,7 +189,8 @@ def _show_batch_count_dialog(parent: tk.Widget,
         try:
             n = int(count_var.get())
             if n >= 1:
-                result[0] = {"count": n, "fn_type": fn_type_var.get()}
+                result[0] = {"count": n, "fn_type": fn_type_var.get(),
+                             "display_type": display_type_var.get()}
         except (ValueError, tk.TclError):
             pass
         dlg.destroy()
@@ -1463,18 +1503,27 @@ class FunctionApp:
         import os
         import random as _rand
 
-        result = _show_batch_count_dialog(self.root, default_fn_type=self._fn_type)
+        current_model = self.model_combo.get()
+        if current_model == "Mapping":
+            default_display = "mapping"
+        elif self._came_from_random:
+            default_display = "mixed"
+        else:
+            default_display = "graph"
+
+        result = _show_batch_count_dialog(self.root, default_fn_type=self._fn_type,
+                                          default_display_type=default_display)
         if not result:
             return
         count = result["count"]
         fn_type = result["fn_type"]
+        display_type = result["display_type"]
 
         folder = filedialog.askdirectory(title="Choose a folder for exported images")
         if not folder:
             return
 
         is_random = self._came_from_random
-        current_model = self.model_combo.get()
 
         if is_random:
             fn_capable = _FN_CAPABLE.get(fn_type, list(_FN_CAPABLE["random"]))
@@ -1488,6 +1537,13 @@ class FunctionApp:
             if not pool:
                 pool = [m for cat, models in self.model_data.items()
                         if cat != "Random" for m in models]
+            # Filter by display type
+            if display_type == "graph":
+                pool = [m for m in pool if m != "Mapping"]
+            elif display_type == "mapping":
+                pool = [m for m in pool if m == "Mapping"]
+            if not pool:
+                pool = ["Mapping"] if display_type == "mapping" else [current_model]
         else:
             pool = [current_model]
 
