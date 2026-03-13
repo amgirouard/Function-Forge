@@ -177,12 +177,16 @@ _init_state()
 
 def _resolve_drawer(graph_group: str,
                     curve_subtype: str | None,
-                    piecewise_subtype: str | None) -> str:
+                    piecewise_subtype: str | None,
+                    fn_type: str = "random") -> str:
     """Return the actual drawer name for a given group + sub-type selection."""
     if graph_group == "Smooth Curve":
         if curve_subtype == "Reciprocal":
             return "Reciprocal"
         if curve_subtype == "Smooth Curve":
+            return "Smooth Curve"
+        # Reciprocal is always a function — exclude it when not_function is selected
+        if fn_type == "not_function":
             return "Smooth Curve"
         return random.choice(["Smooth Curve", "Reciprocal"])
     if graph_group == "Piecewise":
@@ -208,7 +212,7 @@ def _regen(
     cs = st.session_state.curve_subtype     if curve_subtype     is _SENTINEL else curve_subtype
     ps = st.session_state.piecewise_subtype if piecewise_subtype is _SENTINEL else piecewise_subtype
 
-    actual = _resolve_drawer(gg, cs, ps)
+    actual = _resolve_drawer(gg, cs, ps, ft)
     st.session_state.model  = actual
     st.session_state.params = get_random_params(
         actual, fn_type=ft,
@@ -398,13 +402,34 @@ with st.sidebar:
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
 
-        # ── Smooth Curve: sub-types → New Graph ────────────────────────────────
+        # ── Smooth Curve: fn type → sub-types → New Graph ─────────────────────
         elif graph_group == "Smooth Curve":
-            cur_cs    = st.session_state.curve_subtype
-            cs_label  = cur_cs if cur_cs in _CURVE_SUBTYPES else "Any"
+            fn_label_sc  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
+            fn_choice_sc = st.radio(
+                "Function Type", _FN_LABELS,
+                index=_FN_LABELS.index(fn_label_sc),
+                key="fn_radio_smoothcurve",
+                horizontal=True,
+            )
+            new_ft_sc = _FN_MAP[fn_choice_sc]
+            if new_ft_sc != st.session_state.fn_type:
+                st.session_state.fn_type = new_ft_sc
+                # Reciprocal is always a function — clear it if switching to not_function
+                if new_ft_sc == "not_function" and st.session_state.curve_subtype == "Reciprocal":
+                    st.session_state.curve_subtype = None
+                _regen(fn_type=new_ft_sc)
+
+            # Hide Reciprocal option when not_function is selected
+            available_subtypes = (
+                ["Any", "Smooth Curve"]
+                if st.session_state.fn_type == "not_function"
+                else _CURVE_SUBTYPES
+            )
+            cur_cs   = st.session_state.curve_subtype
+            cs_label = cur_cs if cur_cs in available_subtypes else "Any"
             cs_choice = st.radio(
-                "Curve Type", _CURVE_SUBTYPES,
-                index=_CURVE_SUBTYPES.index(cs_label),
+                "Curve Type", available_subtypes,
+                index=available_subtypes.index(cs_label),
                 key="cs_radio",
             )
             new_cs = None if cs_choice == "Any" else cs_choice
@@ -582,8 +607,8 @@ with st.sidebar:
             if "show_labels" in st.session_state.params:
                 st.session_state.params["show_labels"] = new_xy
 
-    # Function type — Graphs category only, for "either" models (not Scatter Plot or Line Segment — handled inline)
-    if _category == "Graphs" and _model not in ("Mapping", "Scatter Plot", "Line Segment"):
+    # Function type — Graphs category only, for "either" models (not handled inline above)
+    if _category == "Graphs" and _model not in ("Mapping", "Scatter Plot", "Line Segment", "Smooth Curve"):
         support = _FN_SUPPORT.get(_model, "either")
         if support == "either":
             st.divider()

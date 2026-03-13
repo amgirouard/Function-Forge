@@ -339,6 +339,62 @@ class SmoothCurveDrawer(GraphDrawer):
         phase      = p.get("phase", 0.0)
         v_shift    = p.get("v_shift", 0.0)
 
+        # Sideways curves: x = f(y) — relations, not functions
+        if curve_type in ("quadratic_h", "cubic_h", "sine_h"):
+            a = p.get("a", 1.0)
+            h = p.get("h", 0.0)
+            k = p.get("k", 0.0)
+            y = np.linspace(LO, HI, 600)
+            if curve_type == "quadratic_h":
+                x = a * (y - k) ** 2 + h              # sideways parabola
+            elif curve_type == "cubic_h":
+                x = a * (y - k) ** 3 + h              # sideways S-curve (a is pre-scaled small)
+            else:  # sine_h
+                freq = p.get("freq", 1.0)
+                x = a * np.sin(freq * (y - k)) + h    # sideways sine wave
+
+            in_range = (x >= LO) & (x <= HI)
+            # _plot_segments expects (horizontal_vals, vertical_vals) — pass (x, y)
+            # but here x is the horizontal axis value for each sample, y is vertical
+            SmoothCurveDrawer._plot_segments(ax, x, y, in_range,
+                                              ctx.graph_color, ctx.line_width)
+
+            # Arrowheads: find the two open ends of the visible curve.
+            # The curve may split into two arms (parabola) or be one sweep (cubic).
+            # Walk through contiguous in_range segments and draw a chevron at each end.
+            indices = np.where(in_range)[0]
+            if len(indices) >= 4:
+                breaks = list(np.where(np.diff(indices) > 1)[0] + 1)
+                segs = np.split(indices, breaks)
+                import math as _m
+                def _chev(tip_x, tip_y, dx, dy):
+                    length = _m.hypot(dx, dy)
+                    if length == 0:
+                        return
+                    ux, uy = dx / length, dy / length
+                    arm, ang = 0.45, 35
+                    for sign in (+1, -1):
+                        a2 = _m.radians(180 - sign * ang)
+                        ca, sa = _m.cos(a2), _m.sin(a2)
+                        ax.plot([tip_x, tip_x + (ux*ca - uy*sa)*arm],
+                                [tip_y, tip_y + (ux*sa + uy*ca)*arm],
+                                color=ctx.graph_color, linewidth=ctx.line_width,
+                                solid_capstyle="round", zorder=5)
+                for seg in segs:
+                    if len(seg) < 4:
+                        continue
+                    step = min(20, len(seg) // 3)
+                    # tip at the low-y end of segment
+                    i0, i1 = seg[0], seg[step]
+                    _chev(x[i0], y[i0], x[i0] - x[i1], y[i0] - y[i1])
+                    # tip at the high-y end of segment
+                    i0, i1 = seg[-1], seg[-1 - step]
+                    _chev(x[i0], y[i0], x[i0] - x[i1], y[i0] - y[i1])
+
+            if ctx.show_vlt:
+                self._draw_vlt(ctx, list(x))
+            return
+
         x = np.linspace(LO, HI, 600)
 
         if curve_type == "sine":
@@ -384,8 +440,32 @@ class SmoothCurveDrawer(GraphDrawer):
                     zorder=4, solid_capstyle="round")
 
     @classmethod
-    def random_params(cls) -> dict:
-        curve_type = random.choice(["sine", "cosine", "cubic", "quadratic"])
+    def random_params(cls, fn_type: str = "random") -> dict:
+        # quadratic_h, cubic_h, sine_h are non-functions (sideways curves)
+        if fn_type == "not_function":
+            curve_type = random.choice(["quadratic_h", "cubic_h", "sine_h"])
+        elif fn_type == "function":
+            curve_type = random.choice(["sine", "cosine", "cubic", "quadratic"])
+        else:
+            curve_type = random.choice(["sine", "cosine", "cubic", "quadratic",
+                                        "quadratic_h", "cubic_h", "sine_h"])
+
+        if curve_type in ("quadratic_h", "cubic_h", "sine_h"):
+            h = random.uniform(-1.5, 1.5)
+            k = random.uniform(-1.5, 1.5)
+            if curve_type == "quadratic_h":
+                # a controls how wide the parabola opens — 0.3–0.8 keeps it clearly visible
+                a = random.choice([-0.8, -0.6, -0.4, 0.4, 0.6, 0.8])
+                return {"curve_type": "quadratic_h", "a": a, "h": h, "k": k}
+            elif curve_type == "cubic_h":
+                # x = a*(y-k)^3 + h; y in [-5,5] so need a~0.03–0.07 for visible sweep
+                a = random.choice([-0.07, -0.05, -0.04, 0.04, 0.05, 0.07])
+                return {"curve_type": "cubic_h", "a": a, "h": h, "k": k}
+            else:  # sine_h: x = a*sin(freq*(y-k)) + h
+                a    = random.choice([-3.0, -2.5, -2.0, 2.0, 2.5, 3.0])
+                freq = random.choice([0.5, 0.75, 1.0])
+                return {"curve_type": "sine_h", "a": a, "h": h, "k": k, "freq": freq}
+
         amplitude  = random.uniform(1.5, 4.0)
         frequency  = random.choice([0.5, 1.0, 1.5, 2.0])
         phase      = random.uniform(0, math.pi)
@@ -731,90 +811,6 @@ class DiscretePointsDrawer(GraphDrawer):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# LINE SEGMENT DRAWER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@GraphRegistry.register("Line Segment")
-class LineSegmentDrawer(GraphDrawer):
-    """A single line segment with filled dots at both endpoints.
-
-    Random segments are guaranteed to span at least 5 grid squares
-    (Euclidean length ≥ 5).  The segment is always fully within [-5, 5].
-    A vertical segment (same x) is a not-a-function; all others are functions.
-    """
-
-    def draw(self, ctx: DrawingContext) -> None:
-        self._setup_axes(ctx)
-        ax = ctx.ax
-        p  = ctx.params
-
-        x0, y0 = p.get("x0", -3.0), p.get("y0", -2.0)
-        x1, y1 = p.get("x1",  3.0), p.get("y1",  2.0)
-
-        ax.plot([x0, x1], [y0, y1],
-                color=ctx.graph_color, linewidth=ctx.line_width,
-                zorder=4, solid_capstyle="round")
-
-        for px, py in [(x0, y0), (x1, y1)]:
-            self._plot_dot(ax, px, py, ctx.dot_style,
-                           ctx.graph_color, ctx.line_width)
-
-        if ctx.show_vlt:
-            self._draw_vlt(ctx, [x0, x1])
-
-    @classmethod
-    def random_params(cls, fn_type: str = "random") -> dict:
-        MIN_LEN = 5.0   # minimum Euclidean length in grid squares
-
-        for _ in range(200):   # retry until length constraint is met
-            if fn_type == "not_function":
-                # Vertical segment: same x, different y
-                x0 = float(random.randint(LO + 1, HI - 1))
-                y0 = float(random.randint(LO, HI - 1))
-                y1 = float(random.randint(int(y0) + 1, HI))
-                # Ensure length ≥ MIN_LEN
-                if abs(y1 - y0) < MIN_LEN:
-                    continue
-                return {"x0": x0, "y0": y0, "x1": x0, "y1": y1}
-
-            elif fn_type == "function":
-                # Non-vertical: x0 ≠ x1
-                x0 = float(random.randint(LO, HI - 1))
-                x1 = float(random.randint(int(x0) + 1, HI))
-                y0 = float(random.randint(LO, HI))
-                y1 = float(random.randint(LO, HI))
-                length = math.hypot(x1 - x0, y1 - y0)
-                if length < MIN_LEN:
-                    continue
-                return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
-
-            else:
-                # Random: either orientation
-                is_vertical = random.random() < 0.15   # mostly functions
-                if is_vertical:
-                    x0 = float(random.randint(LO + 1, HI - 1))
-                    y0 = float(random.randint(LO, HI - 1))
-                    y1 = float(random.randint(int(y0) + 1, HI))
-                    if abs(y1 - y0) < MIN_LEN:
-                        continue
-                    return {"x0": x0, "y0": y0, "x1": x0, "y1": y1}
-                else:
-                    x0 = float(random.randint(LO, HI - 1))
-                    x1 = float(random.randint(int(x0) + 1, HI))
-                    y0 = float(random.randint(LO, HI))
-                    y1 = float(random.randint(LO, HI))
-                    length = math.hypot(x1 - x0, y1 - y0)
-                    if length < MIN_LEN:
-                        continue
-                    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
-
-        # Fallback: guaranteed long diagonal
-        if fn_type == "not_function":
-            return {"x0": 0.0, "y0": float(LO), "x1": 0.0, "y1": float(HI)}
-        return {"x0": float(LO), "y0": float(LO), "x1": float(HI), "y1": float(HI)}
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # MAPPING DRAWER
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1114,7 +1110,6 @@ _RANDOM_DRAWERS: dict[str, type] = {
     "Step Function":   StepFunctionDrawer,
     "Parametric":      ParametricDrawer,
     "Scatter Plot":    ScatterPlotDrawer,
-    "Line Segment":    LineSegmentDrawer,
     "Reciprocal":      ReciprocalDrawer,
     "Mapping":         MappingDrawer,
 }
@@ -1126,7 +1121,7 @@ _RANDOM_DRAWERS: dict[str, type] = {
 # "either"       → can be either depending on random params
 _FN_SUPPORT: dict[str, str] = {
     "Linear":        "function",
-    "Smooth Curve":  "function",
+    "Smooth Curve":  "either",
     "Reciprocal":    "function",
     "Step Function": "function",
     "Parametric":    "not_function",
@@ -1143,7 +1138,8 @@ _FN_CAPABLE: dict[str, list[str]] = {
         "Piecewise", "Scatter Plot", "Line Segment", "Mapping",
     ],
     "not_function": [
-        "Parametric", "Piecewise", "Scatter Plot", "Line Segment", "Mapping",
+        "Parametric", "Piecewise", "Scatter Plot", "Smooth Curve",
+        "Line Segment", "Mapping",
     ],
     "random": list(_RANDOM_DRAWERS.keys()),
 }
