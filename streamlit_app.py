@@ -92,6 +92,10 @@ _FN_LABELS  = ["Function", "Not a Function", "Either"]
 _FN_MAP     = {"Function": "function", "Not a Function": "not_function", "Either": "random"}
 _FN_REVERSE = {v: k for k, v in _FN_MAP.items()}
 
+_MAPPING_SHAPES        = ["Oval", "Rectangle", "Mixed"]
+_MAPPING_SHAPE_MAP     = {"Oval": "oval", "Rectangle": "rectangle", "Mixed": "mixed"}
+_MAPPING_SHAPE_REVERSE = {v: k for k, v in _MAPPING_SHAPE_MAP.items()}
+
 _SENTINEL = object()
 
 
@@ -124,7 +128,7 @@ def _init_state() -> None:
         "grid_style":        "print",
         "graph_color":       "#000000",
         "line_width":        4.0,
-        "mapping_shape":     "oval",
+        "mapping_shape":     "mixed",
         "show_xy_labels":    True,
         "scatter_text":      "",
         "batch_fn_type":      "random",
@@ -181,6 +185,7 @@ def _regen(
     st.session_state.params = get_random_params(
         actual, fn_type=ft,
         linear_type=lt if actual == "Linear" else None,
+        mapping_shape=st.session_state.get("mapping_shape", "mixed"),
     )
     if actual == "Scatter Plot":
         pts = st.session_state.params.get("points", [])
@@ -316,16 +321,30 @@ with st.sidebar:
     else:
         models      = MODEL_DATA.get(category, [])
         prev_group  = st.session_state.graph_group
-        group_idx   = models.index(prev_group) if prev_group in models else 0
-        graph_group = st.selectbox("Graph Type", models, index=group_idx)
 
-        if graph_group != prev_group:
-            st.session_state.graph_group       = graph_group
-            st.session_state.linear_type       = None
-            st.session_state.curve_subtype     = None
-            st.session_state.piecewise_subtype = None
-            _regen(graph_group=graph_group,
-                   linear_type=None, curve_subtype=None, piecewise_subtype=None)
+        # For the Mappings category there's only one type, so show a blank
+        # placeholder label instead of "Mapping" in the dropdown.
+        if category == "Mappings":
+            st.selectbox("Graph Type", ["---"], index=0, disabled=True)
+            graph_group = "Mapping"
+            if graph_group != prev_group:
+                st.session_state.graph_group       = graph_group
+                st.session_state.linear_type       = None
+                st.session_state.curve_subtype     = None
+                st.session_state.piecewise_subtype = None
+                _regen(graph_group=graph_group,
+                       linear_type=None, curve_subtype=None, piecewise_subtype=None)
+        else:
+            group_idx   = models.index(prev_group) if prev_group in models else 0
+            graph_group = st.selectbox("Graph Type", models, index=group_idx)
+
+            if graph_group != prev_group:
+                st.session_state.graph_group       = graph_group
+                st.session_state.linear_type       = None
+                st.session_state.curve_subtype     = None
+                st.session_state.piecewise_subtype = None
+                _regen(graph_group=graph_group,
+                       linear_type=None, curve_subtype=None, piecewise_subtype=None)
 
         # ── Linear: sub-types → New Graph ─────────────────────────────────────
         if graph_group == "Linear":
@@ -410,7 +429,7 @@ with st.sidebar:
             elif pts:
                 st.session_state.params = {"points": pts}
 
-        # ── Mapping: fn type → New Mapping ────────────────────────────────────
+        # ── Mapping: fn type → shape → New Mapping ───────────────────────────
         elif graph_group == "Mapping":
             fn_label_m  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
             fn_choice_m = st.radio(
@@ -422,6 +441,20 @@ with st.sidebar:
             if new_ft_m != st.session_state.fn_type:
                 st.session_state.fn_type = new_ft_m
                 _regen(fn_type=new_ft_m)
+
+            cur_shape_key = _MAPPING_SHAPE_REVERSE.get(
+                st.session_state.mapping_shape, "Mixed")
+            shape_choice = st.radio(
+                "Shape", _MAPPING_SHAPES,
+                index=_MAPPING_SHAPES.index(cur_shape_key),
+                key="mapping_shape_radio",
+                horizontal=True,
+            )
+            new_shape = _MAPPING_SHAPE_MAP[shape_choice]
+            if new_shape != st.session_state.mapping_shape:
+                st.session_state.mapping_shape = new_shape
+                if new_shape != "mixed" and "shape" in st.session_state.params:
+                    st.session_state.params["shape"] = new_shape
 
             if st.button("⟳ New Mapping", use_container_width=True):
                 _regen()
@@ -456,20 +489,10 @@ with st.sidebar:
                 "Line Weight", 0.5, 5.0,
                 value=float(st.session_state.line_width), step=0.5)
 
-    # Mapping options — Shape and X/Y label (hidden in Random)
+    # Mapping options — X/Y label only (Shape is shown inline above New Mapping, hidden in Random)
     if _model == "Mapping" and _category != "Random":
         st.divider()
         st.markdown("**Options**")
-        shape_choice = st.radio(
-            "Shape", ["Oval", "Rectangle"], horizontal=True,
-            index=0 if st.session_state.mapping_shape == "oval" else 1,
-        )
-        new_shape = shape_choice.lower()
-        if new_shape != st.session_state.mapping_shape:
-            st.session_state.mapping_shape = new_shape
-            if "shape" in st.session_state.params:
-                st.session_state.params["shape"] = new_shape
-
         new_xy = st.checkbox("Show X / Y", value=st.session_state.show_xy_labels)
         if new_xy != st.session_state.show_xy_labels:
             st.session_state.show_xy_labels = new_xy
@@ -556,7 +579,7 @@ try:
         grid_style=st.session_state.grid_style,
     )
 
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
 
     png_buf = BytesIO()
     fig.savefig(png_buf, format="png", dpi=200,

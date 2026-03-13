@@ -893,7 +893,7 @@ class MappingDrawer(GraphDrawer):
         ctx.ax.figure.canvas.draw()
 
     @classmethod
-    def random_params(cls, fn_type: str = "random") -> dict:
+    def random_params(cls, fn_type: str = "random", shape: str = "mixed") -> dict:
         import random
         style = random.choice(["ones", "fives"])
         pool  = list(range(0, 21)) if style == "ones" else list(range(0, 101, 5))
@@ -952,12 +952,17 @@ class MappingDrawer(GraphDrawer):
                         arrows.append((di2, ri2))
                         break
 
+        chosen_shape = (
+            random.choice(["oval", "rectangle"])
+            if shape in ("mixed", None)
+            else shape
+        )
         return {
             "domain":      domain,
             "range_vals":  range_vals,
             "arrows":      arrows,
             "show_labels": True,
-            "shape":       random.choice(["oval", "rectangle"]),
+            "shape":       chosen_shape,
         }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1059,12 +1064,15 @@ _FN_CAPABLE: dict[str, list[str]] = {
 
 
 def get_random_params(graph_name: str, fn_type: str = "random",
-                      linear_type: str | None = None) -> dict:
+                      linear_type: str | None = None,
+                      mapping_shape: str = "mixed") -> dict:
     """Return randomly generated params for the given graph type."""
     klass = _RANDOM_DRAWERS.get(graph_name)
     if klass and hasattr(klass, "random_params"):
         if graph_name == "Linear" and linear_type is not None:
             return klass.random_params(line_type=linear_type)
+        if graph_name == "Mapping":
+            return klass.random_params(fn_type=fn_type, shape=mapping_shape)
         try:
             return klass.random_params(fn_type=fn_type)
         except TypeError:
