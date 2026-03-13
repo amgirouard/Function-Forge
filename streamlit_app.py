@@ -51,7 +51,7 @@ from function_forge.validators import CoordinateValidator
 
 # UI-facing dropdown groups (collapsed from the full drawer list)
 MODEL_DATA: dict[str, list[str]] = {
-    "Graphs":   ["Linear", "Smooth Curve", "Piecewise", "Scatter Plot"],
+    "Graphs":   ["Linear", "Smooth Curve", "Piecewise", "Scatter Plot", "Line Segment"],
     "Mappings": ["Mapping"],
 }
 
@@ -62,7 +62,7 @@ _PIECEWISE_SUBTYPES = ["Any", "Piecewise", "Step Function"]
 # All actual drawers (used for Random mode and Batch Export)
 _ALL_GRAPH_DRAWERS = [
     "Linear", "Smooth Curve", "Reciprocal",
-    "Piecewise", "Step Function", "Parametric", "Scatter Plot",
+    "Piecewise", "Step Function", "Parametric", "Scatter Plot", "Line Segment",
 ]
 _ALL_DRAWERS = _ALL_GRAPH_DRAWERS + ["Mapping"]
 
@@ -74,6 +74,7 @@ _DRAWER_GROUP: dict[str, str] = {
     "Piecewise":     "Piecewise",
     "Step Function": "Piecewise",
     "Scatter Plot":  "Scatter Plot",
+    "Line Segment":  "Line Segment",
     "Mapping":       "Mapping",
     "Parametric":    "Parametric",   # only via Random
 }
@@ -157,6 +158,7 @@ def _init_state() -> None:
         "mapping_shape":     "mixed",
         "show_xy_labels":    True,
         "scatter_text":      "",
+        "lineseg_text":      "",
         "batch_fn_type":      "random",
         "batch_display_type": "graph",
         "batch_count":        10,
@@ -216,6 +218,12 @@ def _regen(
     if actual == "Scatter Plot":
         pts = st.session_state.params.get("points", [])
         st.session_state.scatter_text = CoordinateValidator.format_points(pts)
+    if actual == "Line Segment":
+        p = st.session_state.params
+        st.session_state.lineseg_text = CoordinateValidator.format_points([
+            (p.get("x0", -3.0), p.get("y0", -2.0)),
+            (p.get("x1",  3.0), p.get("y1",  2.0)),
+        ])
 
 
 def _render_figure(model: str, params: dict, *,
@@ -456,6 +464,52 @@ with st.sidebar:
                 st.error(err)
             elif pts:
                 st.session_state.params = {"points": pts}
+
+        # ── Line Segment ───────────────────────────────────────────────────────
+        elif graph_group == "Line Segment":
+            fn_label_ls  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
+            fn_choice_ls = st.radio(
+                "Function Type", _FN_LABELS,
+                index=_FN_LABELS.index(fn_label_ls),
+                key="fn_radio_lineseg",
+                horizontal=True,
+            )
+            new_ft_ls = _FN_MAP[fn_choice_ls]
+            if new_ft_ls != st.session_state.fn_type:
+                st.session_state.fn_type = new_ft_ls
+                _regen(fn_type=new_ft_ls)
+
+            if st.button("⟳ New Graph", use_container_width=True, key="new_lineseg"):
+                _regen()
+
+            st.divider()
+            st.markdown("**Points**")
+            # Build display text from current params
+            _ls_p = st.session_state.params
+            _ls_default = CoordinateValidator.format_points([
+                (_ls_p.get("x0", -3.0), _ls_p.get("y0", -2.0)),
+                (_ls_p.get("x1",  3.0), _ls_p.get("y1",  2.0)),
+            ])
+            ls_text = st.text_input(
+                "Two endpoints",
+                value=st.session_state.get("lineseg_text", _ls_default),
+                placeholder="(-3, -2), (3, 2)",
+                key="lineseg_input",
+            )
+            st.session_state.lineseg_text = ls_text
+            ls_pts, ls_err = (CoordinateValidator.parse(ls_text)
+                              if ls_text.strip() else (None, None))
+            if ls_err:
+                st.error(ls_err)
+            elif ls_pts:
+                if len(ls_pts) < 2:
+                    st.error("Enter exactly 2 points.")
+                else:
+                    p0, p1 = ls_pts[0], ls_pts[1]
+                    st.session_state.params = {
+                        "x0": p0[0], "y0": p0[1],
+                        "x1": p1[0], "y1": p1[1],
+                    }
 
         # ── Mapping: fn type → shape → New Mapping ───────────────────────────
         elif graph_group == "Mapping":

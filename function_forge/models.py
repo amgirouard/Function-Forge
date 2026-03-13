@@ -128,6 +128,8 @@ def _build_graph_configs() -> None:
         GraphConfig("Parametric",    "Graphs",   is_function=False,
                     description="Closed curve — relation, not a function"),
         GraphConfig("Scatter Plot",  "Graphs",   is_function=None),
+        GraphConfig("Line Segment",  "Graphs",   is_function=None,
+                    description="Single segment with endpoints — vertical = not a function"),
         GraphConfig("Reciprocal",    "Graphs",   is_function=False,
                     description="y = k/(x-h)+v — hyperbola with asymptotes"),
         # Mappings
