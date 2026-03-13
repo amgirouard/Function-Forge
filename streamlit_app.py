@@ -308,32 +308,37 @@ with st.sidebar:
 
     # ── Category ──────────────────────────────────────────────────────────────
     all_cats = list(MODEL_DATA.keys()) + ["Random"]
-    cat_idx  = all_cats.index(st.session_state.category) \
-               if st.session_state.category in all_cats else 0
-    category = st.selectbox("Category", all_cats, index=cat_idx)
 
-    if category != st.session_state.category:
-        st.session_state.category          = category
+    def _on_category_change():
+        cat = st.session_state._sel_category
+        st.session_state.category          = cat
         st.session_state.linear_type       = None
         st.session_state.curve_subtype     = None
         st.session_state.piecewise_subtype = None
-        if category != "Random":
-            first = MODEL_DATA.get(category, ["Linear"])[0]
+        if cat != "Random":
+            first = MODEL_DATA.get(cat, ["Linear"])[0]
             st.session_state.graph_group = first
             _regen(graph_group=first,
                    linear_type=None, curve_subtype=None, piecewise_subtype=None)
 
+    category = st.selectbox("Category", all_cats,
+                            index=all_cats.index(st.session_state.category)
+                                  if st.session_state.category in all_cats else 0,
+                            key="_sel_category",
+                            on_change=_on_category_change)
+
     # ── Random category ───────────────────────────────────────────────────────
     if category == "Random":
         # Function type — horizontal row
+        def _on_fn_random(): st.session_state.fn_type = _FN_MAP[st.session_state.fn_radio_random]
         fn_label_r  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
-        fn_choice_r = st.radio(
+        st.radio(
             "Type", _FN_LABELS,
             index=_FN_LABELS.index(fn_label_r),
             key="fn_radio_random",
             horizontal=True,
+            on_change=_on_fn_random,
         )
-        st.session_state.fn_type = _FN_MAP[fn_choice_r]
 
         # Buttons — single column
         capable = _FN_CAPABLE.get(st.session_state.fn_type,
@@ -379,16 +384,19 @@ with st.sidebar:
                 _regen(graph_group=graph_group,
                        linear_type=None, curve_subtype=None, piecewise_subtype=None)
         else:
-            group_idx   = models.index(prev_group) if prev_group in models else 0
-            graph_group = st.selectbox("Graph Type", models, index=group_idx)
-
-            if graph_group != prev_group:
-                st.session_state.graph_group       = graph_group
+            def _on_graph_group_change():
+                gg = st.session_state._sel_graph_group
+                st.session_state.graph_group       = gg
                 st.session_state.linear_type       = None
                 st.session_state.curve_subtype     = None
                 st.session_state.piecewise_subtype = None
-                _regen(graph_group=graph_group,
+                _regen(graph_group=gg,
                        linear_type=None, curve_subtype=None, piecewise_subtype=None)
+
+            group_idx   = models.index(prev_group) if prev_group in models else 0
+            graph_group = st.selectbox("Graph Type", models, index=group_idx,
+                                       key="_sel_graph_group",
+                                       on_change=_on_graph_group_change)
 
         # ── Linear: sub-types → New Graph ─────────────────────────────────────
         if graph_group == "Linear":
@@ -436,29 +444,30 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
         # ── Smooth Curve: fn type → sub-types → New Graph ─────────────────────
         elif graph_group == "Smooth Curve":
             fn_label_sc  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
-            fn_choice_sc = st.radio(
+            def _on_fn_sc():
+                st.session_state.fn_type = _FN_MAP[st.session_state.fn_radio_smoothcurve]
+                _regen(fn_type=st.session_state.fn_type)
+            st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_sc),
                 key="fn_radio_smoothcurve",
                 horizontal=True,
+                on_change=_on_fn_sc,
             )
-            new_ft_sc = _FN_MAP[fn_choice_sc]
-            if new_ft_sc != st.session_state.fn_type:
-                st.session_state.fn_type = new_ft_sc
-                _regen(fn_type=new_ft_sc)
 
             available_subtypes = _CURVE_SUBTYPES
             cur_cs   = st.session_state.curve_subtype
             cs_label = cur_cs if cur_cs in available_subtypes else "Mixed"
-            cs_choice = st.radio(
+            def _on_cs():
+                v = st.session_state.cs_radio
+                st.session_state.curve_subtype = None if v == "Mixed" else v
+                _regen(curve_subtype=st.session_state.curve_subtype)
+            st.radio(
                 "Curve Type", available_subtypes,
                 index=available_subtypes.index(cs_label),
                 key="cs_radio",
+                on_change=_on_cs,
             )
-            new_cs = None if cs_choice == "Mixed" else cs_choice
-            if new_cs != st.session_state.curve_subtype:
-                st.session_state.curve_subtype = new_cs
-                _regen(curve_subtype=new_cs)
 
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
@@ -467,15 +476,16 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
         elif graph_group == "Piecewise":
             cur_ps    = st.session_state.piecewise_subtype
             ps_label  = cur_ps if cur_ps in _PIECEWISE_SUBTYPES else "Mixed"
-            ps_choice = st.radio(
+            def _on_ps():
+                v = st.session_state.ps_radio
+                st.session_state.piecewise_subtype = None if v == "Mixed" else v
+                _regen(piecewise_subtype=st.session_state.piecewise_subtype)
+            st.radio(
                 "Piece Type", _PIECEWISE_SUBTYPES,
                 index=_PIECEWISE_SUBTYPES.index(ps_label),
                 key="ps_radio",
+                on_change=_on_ps,
             )
-            new_ps = None if ps_choice == "Mixed" else ps_choice
-            if new_ps != st.session_state.piecewise_subtype:
-                st.session_state.piecewise_subtype = new_ps
-                _regen(piecewise_subtype=new_ps)
 
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
@@ -483,16 +493,16 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
         # ── Scatter Plot ───────────────────────────────────────────────────────
         elif graph_group == "Scatter Plot":
             fn_label_s  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
-            fn_choice_s = st.radio(
+            def _on_fn_s():
+                st.session_state.fn_type = _FN_MAP[st.session_state.fn_radio_scatter]
+                _regen(fn_type=st.session_state.fn_type)
+            st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_s),
                 key="fn_radio_scatter",
                 horizontal=True,
+                on_change=_on_fn_s,
             )
-            new_ft_s = _FN_MAP[fn_choice_s]
-            if new_ft_s != st.session_state.fn_type:
-                st.session_state.fn_type = new_ft_s
-                _regen(fn_type=new_ft_s)
 
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
@@ -516,16 +526,16 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
         # ── Line Segment ───────────────────────────────────────────────────────
         elif graph_group == "Line Segment":
             fn_label_ls  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
-            fn_choice_ls = st.radio(
+            def _on_fn_ls():
+                st.session_state.fn_type = _FN_MAP[st.session_state.fn_radio_lineseg]
+                _regen(fn_type=st.session_state.fn_type)
+            st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_ls),
                 key="fn_radio_lineseg",
                 horizontal=True,
+                on_change=_on_fn_ls,
             )
-            new_ft_ls = _FN_MAP[fn_choice_ls]
-            if new_ft_ls != st.session_state.fn_type:
-                st.session_state.fn_type = new_ft_ls
-                _regen(fn_type=new_ft_ls)
 
             if st.button("⟳ New Graph", use_container_width=True, key="new_lineseg"):
                 _regen()
@@ -562,16 +572,16 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
         # ── Mapping: fn type → shape → New Mapping ───────────────────────────
         elif graph_group == "Mapping":
             fn_label_m  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
-            fn_choice_m = st.radio(
+            def _on_fn_m():
+                st.session_state.fn_type = _FN_MAP[st.session_state.fn_radio_mapping]
+                _regen(fn_type=st.session_state.fn_type)
+            st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_m),
                 key="fn_radio_mapping",
                 horizontal=True,
+                on_change=_on_fn_m,
             )
-            new_ft_m = _FN_MAP[fn_choice_m]
-            if new_ft_m != st.session_state.fn_type:
-                st.session_state.fn_type = new_ft_m
-                _regen(fn_type=new_ft_m)
 
             cur_shape_key = _MAPPING_SHAPE_REVERSE.get(
                 st.session_state.mapping_shape, "Mixed")
