@@ -192,9 +192,6 @@ def _resolve_drawer(graph_group: str,
             return "Reciprocal"
         if curve_subtype == "Smooth Curve":
             return "Smooth Curve"
-        # Reciprocal is always a function — exclude it when not_function is selected
-        if fn_type == "not_function":
-            return "Smooth Curve"
         return random.choice(["Smooth Curve", "Reciprocal"])
     if graph_group == "Piecewise":
         if piecewise_subtype == "Step Function":
@@ -448,17 +445,9 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
             new_ft_sc = _FN_MAP[fn_choice_sc]
             if new_ft_sc != st.session_state.fn_type:
                 st.session_state.fn_type = new_ft_sc
-                # Reciprocal is always a function — clear it if switching to not_function
-                if new_ft_sc == "not_function" and st.session_state.curve_subtype == "Reciprocal":
-                    st.session_state.curve_subtype = None
                 _regen(fn_type=new_ft_sc)
 
-            # Hide Reciprocal option when not_function is selected
-            available_subtypes = (
-                ["Mixed", "Smooth Curve"]
-                if st.session_state.fn_type == "not_function"
-                else _CURVE_SUBTYPES
-            )
+            available_subtypes = _CURVE_SUBTYPES
             cur_cs   = st.session_state.curve_subtype
             cs_label = cur_cs if cur_cs in available_subtypes else "Mixed"
             cs_choice = st.radio(

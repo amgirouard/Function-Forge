@@ -521,7 +521,7 @@ class PiecewiseDrawer(GraphDrawer):
             # Only draw if vertex is inside grid
             vx = max(LO, min(HI, vx))
             vy = max(LO, min(HI, vy))
-            for dx, dy in [(-1, a), (1, a)]:   # left arm, right arm
+            for dx, dy in [(-1, -a), (1, a)]:   # left arm, right arm
                 end = self._clip_ray(vx, vy, dx, dy)
                 if end is None:
                     continue
@@ -546,7 +546,7 @@ class PiecewiseDrawer(GraphDrawer):
             vx, vy = h, k
             vx = max(LO, min(HI, vx))
             vy = max(LO, min(HI, vy))
-            for dx, dy in [(a, -1), (a, 1)]:   # lower arm, upper arm
+            for dx, dy in [(-a, -1), (a, 1)]:   # lower arm, upper arm
                 end = self._clip_ray(vx, vy, dx, dy)
                 if end is None:
                     continue
@@ -1163,18 +1163,18 @@ class MappingDrawer(GraphDrawer):
 
 @GraphRegistry.register("Reciprocal")
 class ReciprocalDrawer(GraphDrawer):
-    """y = k / (x - h) + v  — hyperbola with vertical and horizontal asymptotes."""
+    """y = k/(x-h) + v  or  y = k/(x-h)^2 + v"""
 
     def draw(self, ctx: DrawingContext) -> None:
         self._setup_axes(ctx)
         ax  = ctx.ax
         p   = ctx.params
 
-        k = p.get("k",  1.0)   # stretch / flip
-        h = p.get("h",  0.0)   # horizontal shift (vertical asymptote at x=h)
-        v = p.get("v",  0.0)   # vertical shift   (horizontal asymptote at y=v)
+        k  = p.get("k",  1.0)
+        h  = p.get("h",  0.0)
+        v  = p.get("v",  0.0)
+        sq = p.get("square", False)
 
-        # Draw asymptotes as light dashed lines
         asy_color = "#aaaaaa"
         asy_lw    = 1.0
         ax.plot([h, h], [LO, HI], color=asy_color, linewidth=asy_lw,
@@ -1182,20 +1182,38 @@ class ReciprocalDrawer(GraphDrawer):
         ax.plot([LO, HI], [v, v], color=asy_color, linewidth=asy_lw,
                 linestyle="--", zorder=2, solid_capstyle="butt")
 
-        # Plot each branch separately, skipping the singularity at x == h
         eps   = 1e-6
-        x_all = np.linspace(LO, HI, 1200)
+        sideways = p.get("sideways", False)
 
+        if sideways and sq:
+            # x = k/(y-v)^2 + h  — sideways reciprocal square (not a function)
+            y_all = np.linspace(LO, HI, 1200)
+            for branch_mask in [y_all < v - eps, y_all > v + eps]:
+                yb = y_all[branch_mask]
+                if len(yb) < 2:
+                    continue
+                xb = k / (yb - v) ** 2 + h
+                in_range = (xb >= LO) & (xb <= HI)
+                SmoothCurveDrawer._plot_segments(
+                    ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
+                )
+                LinearDrawer._add_line_arrows(
+                    ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
+                )
+            if ctx.show_vlt:
+                self._draw_vlt(ctx, list(y_all))
+            return
+
+        x_all = np.linspace(LO, HI, 1200)
         for branch_mask in [x_all < h - eps, x_all > h + eps]:
             xb = x_all[branch_mask]
             if len(xb) < 2:
                 continue
-            yb = k / (xb - h) + v
+            yb = k / (xb - h) ** 2 + v if sq else k / (xb - h) + v
             in_range = (yb >= LO) & (yb <= HI)
             SmoothCurveDrawer._plot_segments(
                 ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
             )
-            # Arrowhead at the far end of each branch
             LinearDrawer._add_line_arrows(
                 ax, xb, yb, in_range, ctx.graph_color, ctx.line_width
             )
@@ -1204,11 +1222,22 @@ class ReciprocalDrawer(GraphDrawer):
             self._draw_vlt(ctx, list(x_all))
 
     @classmethod
-    def random_params(cls) -> dict:
-        k = random.choice([-3, -2, -1, 1, 2, 3])
-        h = random.choice([-2, -1, 0, 1, 2])
-        v = random.choice([-2, -1, 0, 1, 2])
-        return {"k": k, "h": h, "v": v}
+    def random_params(cls, fn_type: str = "random") -> dict:
+        # sideways_sq is not a function — exclude it when function-only
+        if fn_type == "function":
+            sq_choices = [False, True]   # upright only
+            sideways = False
+        elif fn_type == "not_function":
+            sq_choices = [True]          # sideways square only
+            sideways = True
+        else:
+            sq_choices = [False, True]
+            sideways = random.random() < 0.33  # 1/3 chance of sideways
+        sq = random.choice(sq_choices)
+        k  = random.choice([-3, -2, -1, 1, 2, 3])
+        h  = random.choice([-2, -1, 0, 1, 2])
+        v  = random.choice([-2, -1, 0, 1, 2])
+        return {"k": k, "h": h, "v": v, "square": sq, "sideways": sideways}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1234,7 +1263,7 @@ _RANDOM_DRAWERS: dict[str, type] = {
 _FN_SUPPORT: dict[str, str] = {
     "Linear":        "function",
     "Smooth Curve":  "either",
-    "Reciprocal":    "function",
+    "Reciprocal":    "either",
     "Step Function": "function",
     "Parametric":    "not_function",
     "Piecewise":     "either",
@@ -1251,7 +1280,7 @@ _FN_CAPABLE: dict[str, list[str]] = {
     ],
     "not_function": [
         "Parametric", "Piecewise", "Scatter Plot", "Smooth Curve",
-        "Line Segment", "Mapping",
+        "Line Segment", "Mapping", "Reciprocal",
     ],
     "random": list(_RANDOM_DRAWERS.keys()),
 }
