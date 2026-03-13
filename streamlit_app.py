@@ -88,8 +88,8 @@ _LT_MAP: dict[str, str | None] = {
 }
 _LT_REVERSE: dict[str | None, str] = {v: k for k, v in _LT_MAP.items()}
 
-_FN_LABELS  = ["Function", "Not a Function", "Either"]
-_FN_MAP     = {"Function": "function", "Not a Function": "not_function", "Either": "random"}
+_FN_LABELS  = ["Function", "Not a Function", "Mixed"]
+_FN_MAP     = {"Function": "function", "Not a Function": "not_function", "Mixed": "random"}
 _FN_REVERSE = {v: k for k, v in _FN_MAP.items()}
 
 _MAPPING_SHAPES        = ["Oval", "Rectangle", "Mixed"]
@@ -108,6 +108,32 @@ st.set_page_config(
     page_icon="📐",
     layout="wide",
 )
+
+# ── Compact sidebar spacing ───────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* Tighten vertical rhythm throughout the sidebar */
+[data-testid="stSidebar"] .stRadio,
+[data-testid="stSidebar"] .stCheckbox,
+[data-testid="stSidebar"] .stSelectbox,
+[data-testid="stSidebar"] .stSlider,
+[data-testid="stSidebar"] .stButton,
+[data-testid="stSidebar"] .stDownloadButton,
+[data-testid="stSidebar"] .stNumberInput {
+    margin-top: 0rem;
+    margin-bottom: 0rem;
+    padding-top: 0rem;
+    padding-bottom: 0rem;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
+    gap: 0.25rem;
+}
+[data-testid="stSidebar"] hr {
+    margin-top: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -282,12 +308,13 @@ with st.sidebar:
 
     # ── Random category ───────────────────────────────────────────────────────
     if category == "Random":
-        # Function type — single column
-        fn_label_r  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+        # Function type — horizontal row
+        fn_label_r  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
         fn_choice_r = st.radio(
             "Type", _FN_LABELS,
             index=_FN_LABELS.index(fn_label_r),
             key="fn_radio_random",
+            horizontal=True,
         )
         st.session_state.fn_type = _FN_MAP[fn_choice_r]
 
@@ -399,11 +426,12 @@ with st.sidebar:
 
         # ── Scatter Plot ───────────────────────────────────────────────────────
         elif graph_group == "Scatter Plot":
-            fn_label_s  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_label_s  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
             fn_choice_s = st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_s),
                 key="fn_radio_scatter",
+                horizontal=True,
             )
             new_ft_s = _FN_MAP[fn_choice_s]
             if new_ft_s != st.session_state.fn_type:
@@ -431,11 +459,12 @@ with st.sidebar:
 
         # ── Mapping: fn type → shape → New Mapping ───────────────────────────
         elif graph_group == "Mapping":
-            fn_label_m  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_label_m  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
             fn_choice_m = st.radio(
                 "Function Type", _FN_LABELS,
                 index=_FN_LABELS.index(fn_label_m),
                 key="fn_radio_mapping",
+                horizontal=True,
             )
             new_ft_m = _FN_MAP[fn_choice_m]
             if new_ft_m != st.session_state.fn_type:
@@ -505,7 +534,7 @@ with st.sidebar:
         if support == "either":
             st.divider()
             st.markdown("**Function Type**")
-            fn_label  = _FN_REVERSE.get(st.session_state.fn_type, "Either")
+            fn_label  = _FN_REVERSE.get(st.session_state.fn_type, "Mixed")
             fn_choice = st.radio(
                 "fn_type_radio", _FN_LABELS, horizontal=True,
                 index=_FN_LABELS.index(fn_label),
@@ -515,6 +544,31 @@ with st.sidebar:
             if new_ft != st.session_state.fn_type:
                 st.session_state.fn_type = new_ft
                 _regen(fn_type=new_ft)
+
+    # ── Download PNG ──────────────────────────────────────────────────────────
+    st.divider()
+    _png_buf = BytesIO()
+    try:
+        _dl_fig = _render_figure(
+            st.session_state.model, st.session_state.params,
+            line_width=st.session_state.line_width,
+            graph_color=st.session_state.graph_color,
+            show_grid=st.session_state.show_grid,
+            grid_style=st.session_state.grid_style,
+        )
+        _dl_fig.savefig(_png_buf, format="png", dpi=200,
+                        bbox_inches="tight", pad_inches=0.05,
+                        facecolor="white")
+        _dl_fig.clf()
+    except Exception:
+        pass
+    st.download_button(
+        "⬇ Download PNG",
+        data=_png_buf.getvalue(),
+        file_name=f"{st.session_state.model.lower().replace(' ', '_')}.png",
+        mime="image/png",
+        use_container_width=True,
+    )
 
     # ── Batch Export ──────────────────────────────────────────────────────────
     st.divider()
@@ -580,18 +634,7 @@ try:
     )
 
     st.pyplot(fig, width="stretch")
-
-    png_buf = BytesIO()
-    fig.savefig(png_buf, format="png", dpi=200,
-                bbox_inches="tight", pad_inches=0.05,
-                facecolor="white")
     fig.clf()
-    st.download_button(
-        "⬇ Download PNG",
-        data=png_buf.getvalue(),
-        file_name=f"{model.lower().replace(' ', '_')}.png",
-        mime="image/png",
-    )
 
 except Exception as exc:
     st.error(f"Draw error: {exc}")
