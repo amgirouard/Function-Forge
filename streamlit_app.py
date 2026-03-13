@@ -56,8 +56,8 @@ MODEL_DATA: dict[str, list[str]] = {
 }
 
 # Sub-type options for grouped graph types
-_CURVE_SUBTYPES     = ["Any", "Smooth Curve", "Reciprocal"]
-_PIECEWISE_SUBTYPES = ["Any", "Piecewise", "Step Function"]
+_CURVE_SUBTYPES     = ["Mixed", "Smooth Curve", "Reciprocal"]
+_PIECEWISE_SUBTYPES = ["Mixed", "Piecewise", "Step Function", "Absolute Value"]
 
 # All actual drawers (used for Random mode and Batch Export)
 _ALL_GRAPH_DRAWERS = [
@@ -79,9 +79,9 @@ _DRAWER_GROUP: dict[str, str] = {
     "Parametric":    "Parametric",   # only via Random
 }
 
-_LT_OPTIONS = ["Any", "Vertical", "Horizontal", "Proportional", "Non-Proportional"]
+_LT_OPTIONS = ["Vertical", "Horizontal", "Proportional", "Non-Proportional", "Mixed"]
 _LT_MAP: dict[str, str | None] = {
-    "Any":              None,
+    "Mixed":              None,
     "Vertical":         "vertical",
     "Horizontal":       "horizontal",
     "Proportional":     "proportional",
@@ -127,11 +127,18 @@ st.markdown("""
     padding-bottom: 0rem;
 }
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
-    gap: 0.25rem;
+    gap: 0rem;
 }
 [data-testid="stSidebar"] hr {
     margin-top: 0.4rem;
     margin-bottom: 0.4rem;
+}
+/* Remove gap between Vertical/Horizontal and Proportional rows using DevTools class */
+.st-key-lt_radio_group {
+    margin-top: -1.5rem !important;
+}
+.st-key-_lt_row2 {
+    margin-top: -1.45rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -192,7 +199,7 @@ def _resolve_drawer(graph_group: str,
     if graph_group == "Piecewise":
         if piecewise_subtype == "Step Function":
             return "Step Function"
-        if piecewise_subtype == "Piecewise":
+        if piecewise_subtype in ("Piecewise", "Absolute Value"):
             return "Piecewise"
         return random.choice(["Piecewise", "Step Function"])
     return graph_group  # Linear, Scatter Plot, Mapping, etc.
@@ -218,6 +225,7 @@ def _regen(
         actual, fn_type=ft,
         linear_type=lt if actual == "Linear" else None,
         mapping_shape=st.session_state.get("mapping_shape", "mixed"),
+        piecewise_subtype=ps if actual == "Piecewise" else None,
     )
     if actual == "Scatter Plot":
         pts = st.session_state.params.get("points", [])
@@ -388,16 +396,42 @@ with st.sidebar:
         # ── Linear: sub-types → New Graph ─────────────────────────────────────
         if graph_group == "Linear":
             cur_lt   = st.session_state.linear_type
-            lt_label = _LT_REVERSE.get(cur_lt, "Any")
-            lt_choice = st.radio(
-                "Line Type", _LT_OPTIONS,
-                index=_LT_OPTIONS.index(lt_label),
-                key="lt_radio",
-            )
-            new_lt = _LT_MAP[lt_choice]
-            if new_lt != st.session_state.linear_type:
-                st.session_state.linear_type = new_lt
-                _regen(linear_type=new_lt)
+            lt_label = _LT_REVERSE.get(cur_lt, "Mixed")
+
+            _LT_ROW1 = ["Vertical", "Horizontal"]
+            _LT_ROW2 = ["Proportional", "Non-Proportional", "Mixed"]
+
+            def _on_lt_row1_change():
+                st.session_state.linear_type = _LT_MAP[st.session_state._lt_row1]
+                _regen(linear_type=st.session_state.linear_type)
+
+            def _on_lt_row2_change():
+                st.session_state.linear_type = _LT_MAP[st.session_state._lt_row2]
+                _regen(linear_type=st.session_state.linear_type)
+
+            st.markdown("**Line Type**")
+            with st.container(key="lt_radio_group"):
+                st.markdown("""<style>
+div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
+    gap: 0 !important;
+}
+</style>""", unsafe_allow_html=True)
+                st.radio(
+                    "lt_row1", _LT_ROW1,
+                    index=_LT_ROW1.index(lt_label) if lt_label in _LT_ROW1 else None,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="_lt_row1",
+                    on_change=_on_lt_row1_change,
+                )
+                st.radio(
+                    "lt_row2", _LT_ROW2,
+                    index=_LT_ROW2.index(lt_label) if lt_label in _LT_ROW2 else None,
+                    horizontal=False,
+                    label_visibility="collapsed",
+                    key="_lt_row2",
+                    on_change=_on_lt_row2_change,
+                )
 
             if st.button("⟳ New Graph", use_container_width=True):
                 _regen()
@@ -421,18 +455,18 @@ with st.sidebar:
 
             # Hide Reciprocal option when not_function is selected
             available_subtypes = (
-                ["Any", "Smooth Curve"]
+                ["Mixed", "Smooth Curve"]
                 if st.session_state.fn_type == "not_function"
                 else _CURVE_SUBTYPES
             )
             cur_cs   = st.session_state.curve_subtype
-            cs_label = cur_cs if cur_cs in available_subtypes else "Any"
+            cs_label = cur_cs if cur_cs in available_subtypes else "Mixed"
             cs_choice = st.radio(
                 "Curve Type", available_subtypes,
                 index=available_subtypes.index(cs_label),
                 key="cs_radio",
             )
-            new_cs = None if cs_choice == "Any" else cs_choice
+            new_cs = None if cs_choice == "Mixed" else cs_choice
             if new_cs != st.session_state.curve_subtype:
                 st.session_state.curve_subtype = new_cs
                 _regen(curve_subtype=new_cs)
@@ -443,13 +477,13 @@ with st.sidebar:
         # ── Piecewise: sub-types → New Graph ───────────────────────────────────
         elif graph_group == "Piecewise":
             cur_ps    = st.session_state.piecewise_subtype
-            ps_label  = cur_ps if cur_ps in _PIECEWISE_SUBTYPES else "Any"
+            ps_label  = cur_ps if cur_ps in _PIECEWISE_SUBTYPES else "Mixed"
             ps_choice = st.radio(
                 "Piece Type", _PIECEWISE_SUBTYPES,
                 index=_PIECEWISE_SUBTYPES.index(ps_label),
                 key="ps_radio",
             )
-            new_ps = None if ps_choice == "Any" else ps_choice
+            new_ps = None if ps_choice == "Mixed" else ps_choice
             if new_ps != st.session_state.piecewise_subtype:
                 st.session_state.piecewise_subtype = new_ps
                 _regen(piecewise_subtype=new_ps)

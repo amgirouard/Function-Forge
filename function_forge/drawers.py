@@ -481,14 +481,87 @@ class SmoothCurveDrawer(GraphDrawer):
 
 @GraphRegistry.register("Piecewise")
 class PiecewiseDrawer(GraphDrawer):
-    """Piecewise linear function: 2–3 connected or disconnected segments."""
+    """Piecewise linear function: 2–3 segments, or absolute value V-shapes."""
+
+    @staticmethod
+    def _clip_ray(x0, y0, dx, dy):
+        """
+        Starting from (x0,y0) going in direction (dx,dy),
+        return the farthest (x1,y1) still inside [LO,HI]×[LO,HI].
+        Returns None if the ray leaves the grid immediately.
+        """
+        t_max = float("inf")
+        if dx > 0:
+            t_max = min(t_max, (HI - x0) / dx)
+        elif dx < 0:
+            t_max = min(t_max, (LO - x0) / dx)
+        if dy > 0:
+            t_max = min(t_max, (HI - y0) / dy)
+        elif dy < 0:
+            t_max = min(t_max, (LO - y0) / dy)
+        if t_max <= 0 or t_max == float("inf"):
+            return None
+        return x0 + dx * t_max, y0 + dy * t_max
 
     def draw(self, ctx: DrawingContext) -> None:
         self._setup_axes(ctx)
         ax = ctx.ax
-        p = ctx.params
+        p  = ctx.params
 
-        # segments: list of {"x0", "y0", "x1", "y1", "open_left", "open_right"}
+        ptype = p.get("piecewise_type", "segments")
+
+        # ── Absolute value: y = a|x - h| + k  (V-shape, function) ──────────────
+        # Left arm:  dx=-1, dy=-a  (slope = a going left means rise=-a per unit)
+        # Right arm: dx=+1, dy=+a
+        if ptype == "abs_v":
+            a  = p.get("a",  1.0)
+            h  = p.get("h",  0.0)
+            k  = p.get("k",  0.0)
+            vx, vy = h, k
+            # Only draw if vertex is inside grid
+            vx = max(LO, min(HI, vx))
+            vy = max(LO, min(HI, vy))
+            for dx, dy in [(-1, a), (1, a)]:   # left arm, right arm
+                end = self._clip_ray(vx, vy, dx, dy)
+                if end is None:
+                    continue
+                x1, y1 = end
+                ax.plot([vx, x1], [vy, y1],
+                        color=ctx.graph_color, linewidth=ctx.line_width,
+                        zorder=4, solid_capstyle="round")
+                LinearDrawer._draw_chevron(ax, x1, y1,
+                                           x1 - vx, y1 - vy,
+                                           ctx.graph_color, ctx.line_width)
+            if ctx.show_vlt:
+                self._draw_vlt(ctx, [])
+            return
+
+        # ── Sideways absolute value: x = a|y - k| + h  (sideways V, not a function) ──
+        # Lower arm: dy=-1, dx=-a  (going downward, x changes by -a per unit)
+        # Upper arm: dy=+1, dx=+a
+        if ptype == "abs_h":
+            a  = p.get("a",  1.0)
+            h  = p.get("h",  0.0)
+            k  = p.get("k",  0.0)
+            vx, vy = h, k
+            vx = max(LO, min(HI, vx))
+            vy = max(LO, min(HI, vy))
+            for dx, dy in [(a, -1), (a, 1)]:   # lower arm, upper arm
+                end = self._clip_ray(vx, vy, dx, dy)
+                if end is None:
+                    continue
+                x1, y1 = end
+                ax.plot([vx, x1], [vy, y1],
+                        color=ctx.graph_color, linewidth=ctx.line_width,
+                        zorder=4, solid_capstyle="round")
+                LinearDrawer._draw_chevron(ax, x1, y1,
+                                           x1 - vx, y1 - vy,
+                                           ctx.graph_color, ctx.line_width)
+            if ctx.show_vlt:
+                self._draw_vlt(ctx, [])
+            return
+
+        # ── Default: piecewise line segments ─────────────────────────────────────
         segments = p.get("segments", self._default_segments())
 
         for seg in segments:
@@ -565,12 +638,51 @@ class PiecewiseDrawer(GraphDrawer):
         return segments
 
     @classmethod
-    def random_params(cls, fn_type: str = "random") -> dict:
+    def _random_abs_v(cls) -> dict:
+        """y = a|x - h| + k  — V-shape, always a function."""
+        a = random.choice([-2.0, -1.5, -1.0, 1.0, 1.5, 2.0])
+        h = random.uniform(-2.5, 2.5)
+        k = random.uniform(-2.5, 2.5)
+        return {"piecewise_type": "abs_v", "a": a, "h": h, "k": k}
+
+    @classmethod
+    def _random_abs_h(cls) -> dict:
+        """x = a|y - k| + h  — sideways V, not a function."""
+        a = random.choice([-2.0, -1.5, -1.0, 1.0, 1.5, 2.0])
+        h = random.uniform(-2.5, 2.5)
+        k = random.uniform(-2.5, 2.5)
+        return {"piecewise_type": "abs_h", "a": a, "h": h, "k": k}
+
+    @classmethod
+    def random_params(cls, fn_type: str = "random",
+                      piecewise_subtype: str | None = None) -> dict:
+        # "Absolute Value" subtype — pick abs_v (function) or abs_h (not_function)
+        if piecewise_subtype == "Absolute Value":
+            if fn_type == "function":
+                return cls._random_abs_v()
+            if fn_type == "not_function":
+                return cls._random_abs_h()
+            return cls._random_abs_v() if random.random() < 0.5 else cls._random_abs_h()
+
+        # "Piecewise" or "Step Function" subtypes never reach here (handled by resolver)
+        # Plain piecewise segments
+        if fn_type == "function":
+            if random.random() < 0.4:
+                return cls._random_abs_v()
+            return {"segments": cls._random_fn_segments()}
         if fn_type == "not_function":
+            if random.random() < 0.4:
+                return cls._random_abs_h()
             return {"segments": cls._random_not_fn_segments()}
-        if fn_type == "random" and random.random() < 0.5:
-            return {"segments": cls._random_not_fn_segments()}
-        return {"segments": cls._random_fn_segments()}
+        # random: equal chance of any type
+        roll = random.random()
+        if roll < 0.2:
+            return cls._random_abs_v()
+        if roll < 0.4:
+            return cls._random_abs_h()
+        if roll < 0.7:
+            return {"segments": cls._random_fn_segments()}
+        return {"segments": cls._random_not_fn_segments()}
 
 
 @GraphRegistry.register("Step Function")
@@ -1147,7 +1259,8 @@ _FN_CAPABLE: dict[str, list[str]] = {
 
 def get_random_params(graph_name: str, fn_type: str = "random",
                       linear_type: str | None = None,
-                      mapping_shape: str = "mixed") -> dict:
+                      mapping_shape: str = "mixed",
+                      piecewise_subtype: str | None = None) -> dict:
     """Return randomly generated params for the given graph type."""
     klass = _RANDOM_DRAWERS.get(graph_name)
     if klass and hasattr(klass, "random_params"):
@@ -1155,6 +1268,9 @@ def get_random_params(graph_name: str, fn_type: str = "random",
             return klass.random_params(line_type=linear_type)
         if graph_name == "Mapping":
             return klass.random_params(fn_type=fn_type, shape=mapping_shape)
+        if graph_name == "Piecewise":
+            return klass.random_params(fn_type=fn_type,
+                                       piecewise_subtype=piecewise_subtype)
         try:
             return klass.random_params(fn_type=fn_type)
         except TypeError:
