@@ -56,8 +56,8 @@ MODEL_DATA: dict[str, list[str]] = {
 }
 
 # Sub-type options for grouped graph types
-_CURVE_SUBTYPES     = ["Mixed", "Smooth Curve", "Reciprocal"]
-_PIECEWISE_SUBTYPES = ["Mixed", "Piecewise", "Step Function", "Absolute Value"]
+_CURVE_SUBTYPES     = ["Smooth Curve", "Reciprocal", "Mixed"]
+_PIECEWISE_SUBTYPES = ["Piecewise", "Step Function", "Absolute Value", "Mixed"]
 
 # All actual drawers (used for Random mode and Batch Export)
 _ALL_GRAPH_DRAWERS = [
