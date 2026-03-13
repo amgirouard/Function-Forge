@@ -492,11 +492,11 @@ with st.sidebar:
             ])
             ls_text = st.text_input(
                 "Two endpoints",
-                value=st.session_state.get("lineseg_text", _ls_default),
+                value=st.session_state.lineseg_text or _ls_default,
                 placeholder="(-3, -2), (3, 2)",
-                key="lineseg_input",
             )
-            st.session_state.lineseg_text = ls_text
+            if ls_text != st.session_state.lineseg_text:
+                st.session_state.lineseg_text = ls_text
             ls_pts, ls_err = (CoordinateValidator.parse(ls_text)
                               if ls_text.strip() else (None, None))
             if ls_err:
@@ -582,8 +582,8 @@ with st.sidebar:
             if "show_labels" in st.session_state.params:
                 st.session_state.params["show_labels"] = new_xy
 
-    # Function type — Graphs category only, for "either" models (not Scatter Plot — handled inline)
-    if _category == "Graphs" and _model not in ("Mapping", "Scatter Plot"):
+    # Function type — Graphs category only, for "either" models (not Scatter Plot or Line Segment — handled inline)
+    if _category == "Graphs" and _model not in ("Mapping", "Scatter Plot", "Line Segment"):
         support = _FN_SUPPORT.get(_model, "either")
         if support == "either":
             st.divider()
@@ -599,9 +599,12 @@ with st.sidebar:
                 st.session_state.fn_type = new_ft
                 _regen(fn_type=new_ft)
 
-    # ── Download PNG ──────────────────────────────────────────────────────────
+    # ── Downloads & Batch Export ──────────────────────────────────────────────
     st.divider()
+
+    # Render once, save to both PNG and SVG buffers
     _png_buf = BytesIO()
+    _svg_buf = BytesIO()
     try:
         _dl_fig = _render_figure(
             st.session_state.model, st.session_state.params,
@@ -613,19 +616,29 @@ with st.sidebar:
         _dl_fig.savefig(_png_buf, format="png", dpi=200,
                         bbox_inches="tight", pad_inches=0.05,
                         facecolor="white")
+        _dl_fig.savefig(_svg_buf, format="svg",
+                        bbox_inches="tight", pad_inches=0.05,
+                        facecolor="white")
         _dl_fig.clf()
     except Exception:
         pass
+
+    _fname = st.session_state.model.lower().replace(" ", "_")
     st.download_button(
         "⬇ Download PNG",
         data=_png_buf.getvalue(),
-        file_name=f"{st.session_state.model.lower().replace(' ', '_')}.png",
+        file_name=f"{_fname}.png",
         mime="image/png",
         use_container_width=True,
     )
+    st.download_button(
+        "⬇ Download SVG",
+        data=_svg_buf.getvalue(),
+        file_name=f"{_fname}.svg",
+        mime="image/svg+xml",
+        use_container_width=True,
+    )
 
-    # ── Batch Export ──────────────────────────────────────────────────────────
-    st.divider()
     with st.expander("Batch Export"):
         b_count = st.number_input(
             "Count", min_value=1, max_value=500,
