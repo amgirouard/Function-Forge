@@ -26,8 +26,12 @@ if _HERE not in sys.path:
 import matplotlib
 matplotlib.use("Agg")
 
+import pathlib as _pathlib
+
 import streamlit as st
+import streamlit.components.v1 as _components
 from matplotlib.figure import Figure
+from PIL import Image as _PILImage
 
 # Suppress noisy matplotlib warnings that surface in the browser log
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
@@ -104,44 +108,82 @@ _SENTINEL = object()
 # Page config (must be first Streamlit call)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+APP_TITLE       = "Function Forge"
+ICON_HEIGHT     = 68
+TITLE_FONT_SIZE = 40
+
+_icon_path = str(_pathlib.Path(__file__).parent / "assets" / "icon.png")
+try:
+    _favicon = _PILImage.open(_icon_path)
+    _favicon.load()
+except FileNotFoundError:
+    _favicon = "📐"
+
 st.set_page_config(
-    page_title="Function Forge",
-    page_icon="📐",
+    page_title=APP_TITLE,
+    page_icon=_favicon,
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# ── Compact sidebar spacing ───────────────────────────────────────────────────
+# ── Sidebar style ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Tighten vertical rhythm throughout the sidebar */
-[data-testid="stSidebar"] .stRadio,
-[data-testid="stSidebar"] .stCheckbox,
-[data-testid="stSidebar"] .stSelectbox,
-[data-testid="stSidebar"] .stSlider,
-[data-testid="stSidebar"] .stButton,
-[data-testid="stSidebar"] .stDownloadButton,
-[data-testid="stSidebar"] .stNumberInput {
-    margin-top: 0rem;
-    margin-bottom: 0rem;
-    padding-top: 0rem;
-    padding-bottom: 0rem;
+/* ── Bebas Neue font (industrial all-caps) ─────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+
+/* ── Compact sidebar widget spacing ───────────────────────────────────── */
+section[data-testid="stSidebar"] .stElementContainer {
+    margin-bottom: -0.4rem;
 }
-[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div {
-    gap: 0rem;
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] .stTextInput,
+section[data-testid="stSidebar"] .stCheckbox,
+section[data-testid="stSidebar"] .stSlider,
+section[data-testid="stSidebar"] .stSelectbox,
+section[data-testid="stSidebar"] .stRadio,
+section[data-testid="stSidebar"] .stButton,
+section[data-testid="stSidebar"] .stDownloadButton,
+section[data-testid="stSidebar"] .stNumberInput {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
 }
-[data-testid="stSidebar"] hr {
-    margin-top: 0.4rem;
-    margin-bottom: 0.4rem;
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div {
+    gap: 0.25rem;
 }
-/* Remove gap between Vertical/Horizontal and Proportional rows using DevTools class */
-.st-key-lt_radio_group {
-    margin-top: -1.5rem !important;
+/* ── Tighten gap between individual radio options ──────────────────────── */
+section[data-testid="stSidebar"] .stRadio > div {
+    gap: 0.05rem !important;
 }
+/* ── Pull row2 of the Line Type split-radio up to match within-row spacing  */
 .st-key-_lt_row2 {
-    margin-top: -1.45rem !important;
+    margin-top: -0.9rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
+_components.html("""<script>
+(function(){
+  var css=[
+    '[data-testid="stSidebarContent"]{padding-top:0!important}',
+    '[data-testid="stSidebar"] hr{margin-top:0!important;margin-bottom:0!important;padding-top:0!important;padding-bottom:0!important}',
+    '[data-testid="stSidebar"] [data-testid="stMarkdownContainer"]:has(hr){margin:0!important;padding:0!important;min-height:0!important}',
+    'section[data-testid="stSidebar"]{z-index:10!important}',
+  ].join('');
+  function fix(){
+    try{
+      var doc=window.parent.document;
+      var s=doc.getElementById('sidebar-style-fix');
+      if(s&&s===doc.head.lastElementChild)return;
+      if(s)s.remove();
+      s=doc.createElement('style');s.id='sidebar-style-fix';s.textContent=css;
+      doc.head.appendChild(s);
+    }catch(e){}
+  }
+  fix();
+  try{new MutationObserver(fix).observe(window.parent.document.head,{childList:true});}catch(e){}
+})();
+</script>""", height=0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -303,7 +345,36 @@ def _build_batch_zip(count: int, fn_type: str, display_type: str) -> bytes:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    st.markdown("## 📐 Function Forge")
+    try:
+        import base64 as _b64
+        with open(_icon_path, 'rb') as _f:
+            _icon_b64 = _b64.b64encode(_f.read()).decode()
+        st.markdown(
+            f'<div style="display:flex;align-items:flex-end;gap:10px;'
+            f'padding-bottom:1.5rem;margin-top:-2rem;">'
+            f'<img src="data:image/png;base64,{_icon_b64}" '
+            f'style="display:block;height:{ICON_HEIGHT}px;width:auto;flex-shrink:0;"/>'
+            f'<svg width="100%" style="display:block;flex:1;min-width:0;overflow:visible;" '
+            f'height="{ICON_HEIGHT - 24}">'
+            f'<text x="0" y="{ICON_HEIGHT - 28}" textLength="100%" '
+            f'lengthAdjust="spacingAndGlyphs" font-size="{TITLE_FONT_SIZE}" '
+            f"font-family=\"'Bebas Neue',sans-serif\" fill=\"currentColor\">"
+            f'{APP_TITLE}'
+            f'</text></svg>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        st.markdown(
+            f'<svg width="100%" height="{ICON_HEIGHT - 24}" '
+            f'style="display:block;overflow:visible;padding-bottom:1.5rem;">'
+            f'<text x="0" y="{ICON_HEIGHT - 28}" textLength="100%" '
+            f'lengthAdjust="spacingAndGlyphs" font-size="{TITLE_FONT_SIZE}" '
+            f"font-family=\"'Bebas Neue',sans-serif\" fill=\"currentColor\">"
+            f'{APP_TITLE}'
+            f'</text></svg>',
+            unsafe_allow_html=True,
+        )
     st.divider()
 
     # ── Category ──────────────────────────────────────────────────────────────
@@ -383,6 +454,7 @@ with st.sidebar:
                 st.session_state.piecewise_subtype = None
                 _regen(graph_group=graph_group,
                        linear_type=None, curve_subtype=None, piecewise_subtype=None)
+            st.divider()
         else:
             def _on_graph_group_change():
                 gg = st.session_state._sel_graph_group
@@ -397,6 +469,8 @@ with st.sidebar:
             graph_group = st.selectbox("Graph Type", models, index=group_idx,
                                        key="_sel_graph_group",
                                        on_change=_on_graph_group_change)
+
+        st.divider()
 
         # ── Linear: sub-types → New Graph ─────────────────────────────────────
         if graph_group == "Linear":
@@ -416,11 +490,6 @@ with st.sidebar:
 
             st.markdown("**Line Type**")
             with st.container(key="lt_radio_group"):
-                st.markdown("""<style>
-div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
-    gap: 0 !important;
-}
-</style>""", unsafe_allow_html=True)
                 st.radio(
                     "lt_row1", _LT_ROW1,
                     index=_LT_ROW1.index(lt_label) if lt_label in _LT_ROW1 else None,
@@ -738,6 +807,42 @@ div[data-testid="lt_radio_group"] [data-testid="stVerticalBlock"] {
                 use_container_width=True,
             )
 
+    # ── Math Forges suite ─────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("""
+<div style="text-align:center;line-height:1.8;">
+  <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Algebra Forge</span>
+  <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Data Forge</span>
+  <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Fraction Forge</span>
+  <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;opacity:0.4;">Function Forge</span>
+  <a href="https://geometry-forge.streamlit.app/" target="_blank"
+     style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;
+            color:inherit;text-decoration:none;">Geometry Forge</a>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Ko-fi widget — injected into parent page so the floating button escapes the iframe ──
+    _components.html("""
+<script>
+(function(){
+  var doc = window.parent.document;
+  if(doc.getElementById('kofi-overlay-script')) return;
+  var s = doc.createElement('script');
+  s.id = 'kofi-overlay-script';
+  s.src = 'https://storage.ko-fi.com/cdn/scripts/overlay-widget.js';
+  s.onload = function(){
+    window.parent.kofiWidgetOverlay.draw('amgirouard', {
+      'type': 'floating-chat',
+      'floating-chat.donateButton.text': 'Support Me',
+      'floating-chat.donateButton.background-color': '#323842',
+      'floating-chat.donateButton.text-color': '#fff'
+    });
+  };
+  doc.head.appendChild(s);
+})();
+</script>
+""", height=0)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main area — graph display
@@ -758,7 +863,9 @@ try:
         grid_style=st.session_state.grid_style,
     )
 
-    st.pyplot(fig, width="stretch")
+    _pad, _main, _ = st.columns([1, 2, 1])
+    with _main:
+        st.pyplot(fig, use_container_width=True)
     fig.clf()
 
 except Exception as exc:
