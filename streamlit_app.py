@@ -811,7 +811,9 @@ with st.sidebar:
     st.divider()
     st.markdown("""
 <div style="text-align:center;line-height:1.8;">
-  <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Algebra Forge</span>
+  <a href="https://algebra-forge.streamlit.app/" target="_blank"
+     style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;
+            color:inherit;text-decoration:none;">Algebra Forge</a>
   <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Data Forge</span>
   <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;">Fraction Forge</span>
   <span style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;display:block;opacity:0.4;">Function Forge</span>
